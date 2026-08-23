@@ -1,1 +1,23 @@
-[]
+[
+  {
+    "id": 1787502111629,
+    "username": "admin",
+    "salt": "f546b19ad3fac3ebdbdf53e6b6168f10",
+    "hash": "c5da385426e55e8db471203ddd5c92c5802d1e79fd8c96be3fb954fa59bb30f2883526c9438eb435a04318d6b1fb087f38c752560df9a447f84a58d4f365dd61",
+    "role": "admin",
+    "createdAt": "2026-08-23T16:21:52.860Z",
+    "lastLoginAt": "2026-08-23T16:21:52.860Z",
+    "active": true
+  },
+  {
+    "id": 1787502111630,
+    "username": "d.kanda",
+    "fullName": "Dior Kanda",
+    "salt": "e9dcaea8739317aa80a264c39a9bd920",
+    "hash": "8963165145dfeb1c184bb8179669d9271cf747c2a52b9016acc8654576403ffed57f1f7e1f184f2279fdd6ebfe729b2673e1ece5ac89c7a0fb984e2324f7a72b",
+    "role": "user",
+    "createdAt": "2026-08-23T16:21:53.051Z",
+    "lastLoginAt": null,
+    "active": true
+  }
+]

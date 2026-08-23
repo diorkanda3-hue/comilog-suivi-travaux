@@ -128,6 +128,7 @@ function publicUser(u, onlineIds){
   return {
     id: u.id,
     username: u.username,
+    fullName: u.fullName || null,
     role: u.role,
     createdAt: u.createdAt,
     lastLoginAt: u.lastLoginAt || null,
@@ -311,6 +312,7 @@ const server = http.createServer(async (req, res)=>{
       const username = String(body.username || '').trim();
       const password = String(body.password || '');
       const role = body.role === 'admin' ? 'admin' : 'user';
+      const fullName = String(body.fullName || '').trim() || null;
       if(!validCredentials(username, password)){ sendJSON(res, 400, { error: 'Identifiant (2+ car.) et mot de passe (4+ car.) requis.' }); return; }
       const users = readUsers();
       if(users.some(u => u.username.toLowerCase() === username.toLowerCase())){
@@ -318,7 +320,7 @@ const server = http.createServer(async (req, res)=>{
         return;
       }
       const { salt, hash } = hashPassword(password);
-      const user = { id: nextId(), username, salt, hash, role, createdAt: new Date().toISOString(), lastLoginAt: null, active: true };
+      const user = { id: nextId(), username, fullName, salt, hash, role, createdAt: new Date().toISOString(), lastLoginAt: null, active: true };
       users.push(user);
       writeUsers(users);
       sendJSON(res, 201, publicUser(user, getOnlineUserIds()));

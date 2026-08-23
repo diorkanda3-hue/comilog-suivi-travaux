@@ -1381,8 +1381,16 @@
       <form id="createUserForm" style="display:none; background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-bottom:16px;">
         <div class="modal-grid">
           <div class="form-field">
+            <label>Prénom</label>
+            <input type="text" id="newuser-firstname" autocomplete="off">
+          </div>
+          <div class="form-field">
+            <label>Nom</label>
+            <input type="text" id="newuser-lastname" autocomplete="off">
+          </div>
+          <div class="form-field">
             <label>Identifiant <span class="req">*</span></label>
-            <input type="text" id="newuser-username" required autocomplete="off">
+            <input type="text" id="newuser-username" required autocomplete="off" placeholder="ex. d.kanda">
           </div>
           <div class="form-field">
             <label>Mot de passe <span class="req">*</span></label>
@@ -1396,6 +1404,7 @@
             </select>
           </div>
         </div>
+        <p class="sidebar-text" style="margin:8px 0 0;">L'identifiant est proposé automatiquement à partir du prénom et du nom (ex. « Dior Kanda » → <span class="mono">d.kanda</span>) — vous pouvez le modifier librement.</p>
         <div class="modal-actions">
           <button type="button" class="reset-btn" id="btnCancelCreateUser">Annuler</button>
           <button type="submit" class="tool-btn primary">Créer le compte</button>
@@ -1406,6 +1415,7 @@
         <table>
           <thead>
             <tr>
+              <th>Nom</th>
               <th>Identifiant</th>
               <th>Rôle</th>
               <th style="cursor:default;">Connexion</th>
@@ -1741,6 +1751,7 @@ async function loadUsersList(){
       const active = u.active !== false;
       return `
       <tr>
+        <td>${u.fullName ? escapeHtml(u.fullName) : '<span style="color:var(--muted);">—</span>'}</td>
         <td class="mono">${escapeHtml(u.username)}${isSelf ? ' (vous)' : ''}</td>
         <td>
           <select class="role-select" data-id="${u.id}" ${isSelf ? 'disabled title="Vous ne pouvez pas modifier votre propre rôle"' : ''} style="background:var(--panel); border:1px solid var(--line); color:var(--text); padding:5px 8px; border-radius:6px; font-family:'Inter',sans-serif; font-size:12px;">
@@ -1827,27 +1838,55 @@ async function loadUsersList(){
 
 document.getElementById('btnShowCreateUser').addEventListener('click', ()=>{
   document.getElementById('createUserForm').style.display = 'block';
-  document.getElementById('newuser-username').focus();
+  document.getElementById('newuser-firstname').focus();
 });
 document.getElementById('btnCancelCreateUser').addEventListener('click', ()=>{
   document.getElementById('createUserForm').style.display = 'none';
   document.getElementById('createUserForm').reset();
+  __usernameManuallyEdited = false;
 });
+
+// Propose automatiquement un identifiant à partir du prénom + nom
+// (ex. « Dior Kanda » → « d.kanda »), modifiable librement ensuite.
+function slugifyIdentifiant(s){
+  return String(s || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // retire les accents
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+let __usernameManuallyEdited = false;
+function suggestUsername(){
+  if(__usernameManuallyEdited) return;
+  const first = slugifyIdentifiant(document.getElementById('newuser-firstname').value);
+  const last = slugifyIdentifiant(document.getElementById('newuser-lastname').value);
+  const usernameField = document.getElementById('newuser-username');
+  if(first && last){ usernameField.value = `${first[0]}.${last}`; }
+  else if(last){ usernameField.value = last; }
+  else if(first){ usernameField.value = first; }
+}
+document.getElementById('newuser-firstname').addEventListener('input', suggestUsername);
+document.getElementById('newuser-lastname').addEventListener('input', suggestUsername);
+document.getElementById('newuser-username').addEventListener('input', ()=>{ __usernameManuallyEdited = true; });
+
 document.getElementById('createUserForm').addEventListener('submit', async (e)=>{
   e.preventDefault();
+  const firstName = document.getElementById('newuser-firstname').value.trim();
+  const lastName = document.getElementById('newuser-lastname').value.trim();
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || null;
   const username = document.getElementById('newuser-username').value.trim();
   const password = document.getElementById('newuser-password').value;
   const role = document.getElementById('newuser-role').value;
   try{
     const res = await apiFetch('/api/users', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({username, password, role}),
+      body: JSON.stringify({username, password, role, fullName}),
     });
     const data = await res.json();
     if(!res.ok){ showToast(data.error || 'Création impossible.', true); return; }
     showToast(`Compte « ${username} » créé avec succès.`);
     document.getElementById('createUserForm').reset();
     document.getElementById('createUserForm').style.display = 'none';
+    __usernameManuallyEdited = false;
     loadUsersList();
   }catch(err){
     showToast('Serveur injoignable.', true);
