@@ -31,14 +31,17 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.join(__dirname, 'data');
 const DOSSIERS_FILE = path.join(DATA_DIR, 'dossiers.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const ACTIVITY_FILE = path.join(DATA_DIR, 'activity.json');
+const ACTIVITY_MAX_ENTRIES = 1000; // évite que le fichier ne grossisse indéfiniment
 
 // ============================================================
-// Stockage fichier (dossiers + utilisateurs)
+// Stockage fichier (dossiers + utilisateurs + historique)
 // ============================================================
 function ensureDataFiles(){
   if(!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if(!fs.existsSync(DOSSIERS_FILE)) fs.writeFileSync(DOSSIERS_FILE, '[]', 'utf8');
   if(!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, '[]', 'utf8');
+  if(!fs.existsSync(ACTIVITY_FILE)) fs.writeFileSync(ACTIVITY_FILE, '[]', 'utf8');
 }
 function readJSON(file){
   ensureDataFiles();
@@ -53,6 +56,21 @@ const readDossiers = () => readJSON(DOSSIERS_FILE);
 const writeDossiers = (list) => writeJSON(DOSSIERS_FILE, list);
 const readUsers = () => readJSON(USERS_FILE);
 const writeUsers = (list) => writeJSON(USERS_FILE, list);
+const readActivity = () => readJSON(ACTIVITY_FILE);
+
+let __activityIdCounter = Date.now();
+function logActivity(username, action, details){
+  const list = readActivity();
+  list.unshift({
+    id: ++__activityIdCounter,
+    username,
+    action, // 'ajout' | 'modification' | 'suppression' | 'import'
+    details: details || null,
+    at: new Date().toISOString(),
+  });
+  if(list.length > ACTIVITY_MAX_ENTRIES) list.length = ACTIVITY_MAX_ENTRIES;
+  writeJSON(ACTIVITY_FILE, list);
+}
 
 let __idCounter = Date.now();
 function nextId(){ __idCounter += 1; return __idCounter; }
@@ -367,7 +385,8 @@ const server = http.createServer(async (req, res)=>{
   }
 
   if(pathname === '/api/dossiers' && req.method === 'POST'){
-    if(!requireAuth(req, res)) return;
+    const actor = requireAuth(req, res);
+    if(!actor) return;
     try{
       const record = await readBody(req);
       if(!record || typeof record !== 'object'){ sendJSON(res, 400, { error: 'Dossier invalide' }); return; }
@@ -375,18 +394,21 @@ const server = http.createServer(async (req, res)=>{
       record.id = nextId();
       list.unshift(record);
       writeDossiers(list);
+      logActivity(actor.username, 'ajout', `Dossier N° OT ${record.N_OT || record.id}`);
       sendJSON(res, 201, record);
     }catch(err){ sendJSON(res, 400, { error: err.message }); }
     return;
   }
 
   if(pathname === '/api/dossiers/import' && req.method === 'POST'){
-    if(!requireAuth(req, res)) return;
+    const actor = requireAuth(req, res);
+    if(!actor) return;
     try{
       const records = await readBody(req);
       if(!Array.isArray(records)){ sendJSON(res, 400, { error: 'Un tableau de dossiers est attendu' }); return; }
       const withIds = records.map(r => ({ ...r, id: nextId() }));
       writeDossiers(withIds);
+      logActivity(actor.username, 'import', `${withIds.length} dossier(s) importé(s) depuis Excel`);
       sendJSON(res, 200, { imported: withIds.length, dossiers: withIds });
     }catch(err){ sendJSON(res, 400, { error: err.message }); }
     return;
@@ -394,7 +416,8 @@ const server = http.createServer(async (req, res)=>{
 
   const singleMatch = pathname.match(/^\/api\/dossiers\/([^/]+)$/);
   if(singleMatch && req.method === 'PUT'){
-    if(!requireAuth(req, res)) return;
+    const actor = requireAuth(req, res);
+    if(!actor) return;
     try{
       const id = singleMatch[1];
       const updates = await readBody(req);
@@ -403,19 +426,30 @@ const server = http.createServer(async (req, res)=>{
       if(idx === -1){ sendJSON(res, 404, { error: 'Dossier introuvable' }); return; }
       list[idx] = { ...list[idx], ...updates, id: list[idx].id };
       writeDossiers(list);
+      logActivity(actor.username, 'modification', `Dossier N° OT ${list[idx].N_OT || id}`);
       sendJSON(res, 200, list[idx]);
     }catch(err){ sendJSON(res, 400, { error: err.message }); }
     return;
   }
 
   if(singleMatch && req.method === 'DELETE'){
-    if(!requireAuth(req, res)) return;
+    const actor = requireAuth(req, res);
+    if(!actor) return;
     const id = singleMatch[1];
     const list = readDossiers();
+    const target = list.find(r => String(r.id) === id);
     const next = list.filter(r => String(r.id) !== id);
     if(next.length === list.length){ sendJSON(res, 404, { error: 'Dossier introuvable' }); return; }
     writeDossiers(next);
+    logActivity(actor.username, 'suppression', `Dossier N° OT ${target && target.N_OT || id}`);
     sendJSON(res, 200, { deleted: true, id });
+    return;
+  }
+
+  // ---------------- HISTORIQUE DES ACTIONS (protégé : tout utilisateur connecté) ----------------
+  if(pathname === '/api/activity' && req.method === 'GET'){
+    if(!requireAuth(req, res)) return;
+    sendJSON(res, 200, readActivity());
     return;
   }
 
