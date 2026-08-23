@@ -1,10 +1,1 @@
-[
-  {
-    "id": 1787390666102,
-    "username": "admin",
-    "salt": "4ea104ebb20c21245a78cea3a36db53e",
-    "hash": "8c6cb498ba2ffb1c7c90aaec39877afd76b6e42d46d4c8af372c7b4c5c59f1b2e1cd93567c8e108a38370e84aeb5444d2ad9eb229a4e30bd1b589147a97664e2",
-    "role": "admin",
-    "createdAt": "2026-08-22T09:25:28.377Z"
-  }
-]
+[]

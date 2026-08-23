@@ -78,10 +78,11 @@ function verifyPassword(password, salt, hash){
 // suffit de se reconnecter, comportement volontairement simple)
 const sessions = new Map();
 const SESSION_DURATION_MS = 12 * 60 * 60 * 1000; // 12 heures
+const ONLINE_THRESHOLD_MS = 5 * 60 * 1000; // considéré "en ligne" si actif dans les 5 dernières minutes
 
 function createSession(userId){
   const token = crypto.randomBytes(32).toString('hex');
-  sessions.set(token, { userId, expiresAt: Date.now() + SESSION_DURATION_MS });
+  sessions.set(token, { userId, expiresAt: Date.now() + SESSION_DURATION_MS, lastActivityAt: Date.now() });
   return token;
 }
 function getSessionUser(token){
@@ -89,12 +90,32 @@ function getSessionUser(token){
   const session = sessions.get(token);
   if(!session) return null;
   if(session.expiresAt < Date.now()){ sessions.delete(token); return null; }
+  session.lastActivityAt = Date.now();
   const users = readUsers();
   const user = users.find(u => u.id === session.userId);
+  if(user && user.active === false) return null;
   return user || null;
 }
-function publicUser(u){
-  return { id: u.id, username: u.username, role: u.role, createdAt: u.createdAt };
+function getOnlineUserIds(){
+  const online = new Set();
+  const now = Date.now();
+  for(const session of sessions.values()){
+    if(session.expiresAt >= now && (now - session.lastActivityAt) <= ONLINE_THRESHOLD_MS){
+      online.add(session.userId);
+    }
+  }
+  return online;
+}
+function publicUser(u, onlineIds){
+  return {
+    id: u.id,
+    username: u.username,
+    role: u.role,
+    createdAt: u.createdAt,
+    lastLoginAt: u.lastLoginAt || null,
+    online: onlineIds ? onlineIds.has(u.id) : false,
+    active: u.active !== false,
+  };
 }
 
 // ============================================================
@@ -207,10 +228,11 @@ const server = http.createServer(async (req, res)=>{
       const password = String(body.password || '');
       if(!validCredentials(username, password)){ sendJSON(res, 400, { error: 'Identifiant (2+ car.) et mot de passe (4+ car.) requis.' }); return; }
       const { salt, hash } = hashPassword(password);
-      const user = { id: nextId(), username, salt, hash, role: 'admin', createdAt: new Date().toISOString() };
+      const nowIso = new Date().toISOString();
+      const user = { id: nextId(), username, salt, hash, role: 'admin', createdAt: nowIso, lastLoginAt: nowIso, active: true };
       writeUsers([user]);
       const token = createSession(user.id);
-      sendJSON(res, 201, { token, user: publicUser(user) });
+      sendJSON(res, 201, { token, user: publicUser(user, getOnlineUserIds()) });
     }catch(err){ sendJSON(res, 400, { error: err.message }); }
     return;
   }
@@ -226,8 +248,16 @@ const server = http.createServer(async (req, res)=>{
         sendJSON(res, 401, { error: 'Identifiant ou mot de passe incorrect.' });
         return;
       }
+      if(user.active === false){
+        sendJSON(res, 403, { error: 'Ce compte a été désactivé. Contactez un administrateur.' });
+        return;
+      }
       const token = createSession(user.id);
-      sendJSON(res, 200, { token, user: publicUser(user) });
+      user.lastLoginAt = new Date().toISOString();
+      const allUsers = readUsers();
+      const idx = allUsers.findIndex(u => u.id === user.id);
+      if(idx !== -1){ allUsers[idx].lastLoginAt = user.lastLoginAt; writeUsers(allUsers); }
+      sendJSON(res, 200, { token, user: publicUser(user, getOnlineUserIds()) });
     }catch(err){ sendJSON(res, 400, { error: err.message }); }
     return;
   }
@@ -235,7 +265,7 @@ const server = http.createServer(async (req, res)=>{
   if(pathname === '/api/auth/me' && req.method === 'GET'){
     const user = requireAuth(req, res);
     if(!user) return;
-    sendJSON(res, 200, { user: publicUser(user) });
+    sendJSON(res, 200, { user: publicUser(user, getOnlineUserIds()) });
     return;
   }
 
@@ -250,7 +280,8 @@ const server = http.createServer(async (req, res)=>{
   if(pathname === '/api/users' && req.method === 'GET'){
     const admin = requireAdmin(req, res);
     if(!admin) return;
-    sendJSON(res, 200, readUsers().map(publicUser));
+    const onlineIds = getOnlineUserIds();
+    sendJSON(res, 200, readUsers().map(u => publicUser(u, onlineIds)));
     return;
   }
 
@@ -269,15 +300,44 @@ const server = http.createServer(async (req, res)=>{
         return;
       }
       const { salt, hash } = hashPassword(password);
-      const user = { id: nextId(), username, salt, hash, role, createdAt: new Date().toISOString() };
+      const user = { id: nextId(), username, salt, hash, role, createdAt: new Date().toISOString(), lastLoginAt: null, active: true };
       users.push(user);
       writeUsers(users);
-      sendJSON(res, 201, publicUser(user));
+      sendJSON(res, 201, publicUser(user, getOnlineUserIds()));
     }catch(err){ sendJSON(res, 400, { error: err.message }); }
     return;
   }
 
   const userMatch = pathname.match(/^\/api\/users\/([^/]+)$/);
+  if(userMatch && req.method === 'PUT'){
+    const admin = requireAdmin(req, res);
+    if(!admin) return;
+    try{
+      const id = Number(userMatch[1]);
+      const body = await readBody(req) || {};
+      if(typeof body.active !== 'boolean'){ sendJSON(res, 400, { error: 'Champ "active" (booléen) requis.' }); return; }
+      const users = readUsers();
+      const idx = users.findIndex(u => u.id === id);
+      if(idx === -1){ sendJSON(res, 404, { error: 'Compte introuvable.' }); return; }
+      if(!body.active){
+        if(id === admin.id){ sendJSON(res, 400, { error: 'Vous ne pouvez pas désactiver votre propre compte.' }); return; }
+        const remainingActiveAdmins = users.filter(u => u.role === 'admin' && u.id !== id && u.active !== false).length;
+        if(users[idx].role === 'admin' && remainingActiveAdmins === 0){
+          sendJSON(res, 400, { error: 'Impossible de désactiver le dernier compte administrateur actif.' });
+          return;
+        }
+      }
+      users[idx].active = body.active;
+      writeUsers(users);
+      if(!body.active){
+        // invalide les sessions de ce compte pour un effet immédiat
+        for(const [token, s] of sessions){ if(s.userId === id) sessions.delete(token); }
+      }
+      sendJSON(res, 200, publicUser(users[idx], getOnlineUserIds()));
+    }catch(err){ sendJSON(res, 400, { error: err.message }); }
+    return;
+  }
+
   if(userMatch && req.method === 'DELETE'){
     const admin = requireAdmin(req, res);
     if(!admin) return;

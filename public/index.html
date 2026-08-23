@@ -832,12 +832,32 @@
     font-size:9px; text-transform:uppercase; letter-spacing:.05em; background:rgba(156,135,214,0.18);
     color:var(--purple); padding:1px 6px; border-radius:8px; margin-left:2px;
   }
-  #btnLogout{background:transparent; border:1px solid var(--line); color:var(--muted); width:28px; height:28px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;}
+  #btnLogout{background:transparent; border:1px solid var(--line); color:var(--muted); padding:6px 12px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; font-size:12px; font-family:'Inter',sans-serif; white-space:nowrap;}
   #btnLogout:hover{border-color:var(--red); color:var(--red);}
   #usersTableBody td{white-space:nowrap;}
   .user-role-badge{padding:2px 9px; border-radius:20px; font-size:11px; font-weight:500;}
   .user-role-badge.admin{background:rgba(156,135,214,0.18); color:var(--purple);}
   .user-role-badge.user{background:rgba(78,151,217,0.15); color:var(--blue);}
+  .user-status{display:inline-flex; align-items:center; gap:6px; font-size:12px;}
+  .user-status .dot{width:8px; height:8px; border-radius:50%; flex-shrink:0;}
+  .user-status.online{color:var(--green);}
+  .user-status.online .dot{background:var(--green); box-shadow:0 0 6px var(--green);}
+  .user-status.offline{color:var(--muted);}
+  .user-status.offline .dot{background:var(--muted);}
+  .account-toggle{display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none;}
+  .account-toggle .switch{
+    position:relative; width:34px; height:19px; border-radius:20px; background:var(--line);
+    transition:background .15s; flex-shrink:0;
+  }
+  .account-toggle .switch::after{
+    content:""; position:absolute; top:2px; left:2px; width:15px; height:15px; border-radius:50%;
+    background:#fff; transition:transform .15s;
+  }
+  .account-toggle.active .switch{background:var(--green);}
+  .account-toggle.active .switch::after{transform:translateX(15px);}
+  .account-toggle .toggle-label{font-size:11.5px; color:var(--muted);}
+  .account-toggle.active .toggle-label{color:var(--green);}
+  .account-toggle.disabled{opacity:.5; cursor:not-allowed;}
 
   /* ---------- PRINT ---------- */
   @media print{
@@ -923,6 +943,7 @@
     <a href="#chartsSection">📈 Graphiques</a>
     <a href="#gestionDossiers">📁 Gestion des dossiers</a>
     <a href="#" id="navAdminLink" style="display:none;">🔑 Administration</a>
+    <a href="#" id="navLogoutLink" style="display:none;">🚪 Déconnexion</a>
   </nav>
 
   <p class="sidebar-heading">Légende des statuts <span class="legend-hint">(cliquable)</span></p>
@@ -987,6 +1008,7 @@
         <span id="userLabel"></span>
         <button type="button" id="btnLogout" title="Se déconnecter">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Déconnexion
         </button>
       </div>
     </div>
@@ -1380,7 +1402,10 @@
             <tr>
               <th>Identifiant</th>
               <th>Rôle</th>
+              <th style="cursor:default;">Connexion</th>
+              <th style="cursor:default;">Compte</th>
               <th>Créé le</th>
+              <th>Dernière connexion</th>
               <th style="cursor:default;">Actions</th>
             </tr>
           </thead>
@@ -1454,6 +1479,7 @@ function handleUnauthorized(){
   document.getElementById('userBadge').style.display = 'none';
   document.getElementById('btnOpenAdmin').style.display = 'none';
   document.getElementById('navAdminLink').style.display = 'none';
+  document.getElementById('navLogoutLink').style.display = 'none';
   document.getElementById('loginOverlay').classList.add('show');
   document.getElementById('loginError').textContent = 'Session expirée — veuillez vous reconnecter.';
 }
@@ -1540,6 +1566,7 @@ function onLoginSuccess(){
   document.getElementById('userAvatar').textContent = CURRENT_USER.username.slice(0,2).toUpperCase();
   document.getElementById('userLabel').innerHTML = escapeHtml(CURRENT_USER.username) +
     (CURRENT_USER.role === 'admin' ? '<span class="role-tag">Admin</span>' : '');
+  document.getElementById('navLogoutLink').style.display = '';
 
   if(CURRENT_USER.role === 'admin'){
     document.getElementById('btnOpenAdmin').style.display = '';
@@ -1554,12 +1581,15 @@ function onLoginSuccess(){
   }
 }
 
-document.getElementById('btnLogout').addEventListener('click', async ()=>{
-  try{ await apiFetch('/api/auth/logout', {method:'POST'}); }catch(err){}
-  AUTH_TOKEN = null; CURRENT_USER = null;
-  localStorage.removeItem('stp_token');
-  location.reload();
-});
+function doLogout(){
+  apiFetch('/api/auth/logout', {method:'POST'}).catch(()=>{}).finally(()=>{
+    AUTH_TOKEN = null; CURRENT_USER = null;
+    localStorage.removeItem('stp_token');
+    location.reload();
+  });
+}
+document.getElementById('btnLogout').addEventListener('click', doLogout);
+document.getElementById('navLogoutLink').addEventListener('click', (e)=>{ e.preventDefault(); doLogout(); });
 
 async function syncFromServer(){
   try{
@@ -1581,11 +1611,18 @@ async function syncFromServer(){
 // ADMINISTRATION DES COMPTES
 // =========================================================
 const adminModal = document.getElementById('adminModalOverlay');
-function openAdminModal(){ adminModal.classList.add('show'); loadUsersList(); }
+let __adminRefreshTimer = null;
+function openAdminModal(){
+  adminModal.classList.add('show');
+  loadUsersList();
+  clearInterval(__adminRefreshTimer);
+  __adminRefreshTimer = setInterval(loadUsersList, 15000);
+}
 function closeAdminModal(){
   adminModal.classList.remove('show');
   document.getElementById('createUserForm').style.display = 'none';
   document.getElementById('createUserForm').reset();
+  clearInterval(__adminRefreshTimer);
 }
 document.getElementById('btnOpenAdmin').addEventListener('click', openAdminModal);
 document.getElementById('navAdminLink').addEventListener('click', (e)=>{ e.preventDefault(); openAdminModal(); });
@@ -1597,15 +1634,42 @@ async function loadUsersList(){
     const res = await apiFetch('/api/users');
     if(!res.ok){ showToast('Impossible de charger la liste des comptes.', true); return; }
     const users = await res.json();
-    document.getElementById('usersTableBody').innerHTML = users.map(u=>`
+    const fmtDateTime = iso => iso ? new Date(iso).toLocaleString('fr-FR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'}) : '—';
+    document.getElementById('usersTableBody').innerHTML = users.map(u=>{
+      const isSelf = CURRENT_USER && u.id === CURRENT_USER.id;
+      const active = u.active !== false;
+      return `
       <tr>
-        <td class="mono">${escapeHtml(u.username)}${CURRENT_USER && u.id===CURRENT_USER.id ? ' (vous)' : ''}</td>
+        <td class="mono">${escapeHtml(u.username)}${isSelf ? ' (vous)' : ''}</td>
         <td><span class="user-role-badge ${u.role}">${u.role==='admin' ? 'Administrateur' : 'Utilisateur'}</span></td>
-        <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr-FR') : '—'}</td>
+        <td><span class="user-status ${u.online ? 'online' : 'offline'}"><span class="dot"></span>${u.online ? 'En ligne' : 'Hors ligne'}</span></td>
+        <td>
+          <span class="account-toggle ${active ? 'active' : ''} ${isSelf ? 'disabled' : ''}" data-id="${u.id}" data-active="${active}" title="${isSelf ? 'Vous ne pouvez pas modifier votre propre compte' : (active ? 'Cliquer pour désactiver' : 'Cliquer pour activer')}">
+            <span class="switch"></span>
+            <span class="toggle-label">${active ? 'Actif' : 'Désactivé'}</span>
+          </span>
+        </td>
+        <td>${fmtDateTime(u.createdAt)}</td>
+        <td>${u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : 'Jamais connecté'}</td>
         <td><button type="button" class="row-delete-btn" data-id="${u.id}" title="Supprimer ce compte">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
         </button></td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
+    document.querySelectorAll('#usersTableBody .account-toggle:not(.disabled)').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const id = el.dataset.id;
+        const currentlyActive = el.dataset.active === 'true';
+        const nextActive = !currentlyActive;
+        if(!nextActive && !confirm('Désactiver ce compte ? La personne ne pourra plus se connecter tant que vous ne le réactivez pas.')) return;
+        try{
+          const res2 = await apiFetch(`/api/users/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({active: nextActive})});
+          const d = await res2.json().catch(()=>({}));
+          if(res2.ok){ showToast(nextActive ? 'Compte activé.' : 'Compte désactivé.'); loadUsersList(); }
+          else{ showToast(d.error || 'Modification impossible.', true); }
+        }catch(err){ showToast('Serveur injoignable.', true); }
+      });
+    });
     document.querySelectorAll('#usersTableBody .row-delete-btn').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         if(!confirm('Supprimer ce compte utilisateur ? Cette action est irréversible.')) return;
@@ -2686,6 +2750,9 @@ function initApp(){
       try{ renderCharts(getFiltered()); }catch(err){ console.error(err); renderChartsNative(getFiltered()); }
     }
   });
+  // Signal de présence régulier : garde le statut "en ligne" à jour dans
+  // l'Administration même si l'utilisateur ne fait aucune action pendant un moment.
+  setInterval(()=>{ apiFetch('/api/auth/me').catch(()=>{}); }, 2 * 60 * 1000);
 }
 
 initAuthScreen();
