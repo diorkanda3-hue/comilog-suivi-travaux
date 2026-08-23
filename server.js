@@ -333,11 +333,15 @@ const server = http.createServer(async (req, res)=>{
     try{
       const id = Number(userMatch[1]);
       const body = await readBody(req) || {};
-      if(typeof body.active !== 'boolean'){ sendJSON(res, 400, { error: 'Champ "active" (booléen) requis.' }); return; }
+      if(typeof body.active !== 'boolean' && body.role === undefined){
+        sendJSON(res, 400, { error: 'Champ "active" (booléen) ou "role" requis.' });
+        return;
+      }
       const users = readUsers();
       const idx = users.findIndex(u => u.id === id);
       if(idx === -1){ sendJSON(res, 404, { error: 'Compte introuvable.' }); return; }
-      if(!body.active){
+
+      if(typeof body.active === 'boolean' && !body.active){
         if(id === admin.id){ sendJSON(res, 400, { error: 'Vous ne pouvez pas désactiver votre propre compte.' }); return; }
         const remainingActiveAdmins = users.filter(u => u.role === 'admin' && u.id !== id && u.active !== false).length;
         if(users[idx].role === 'admin' && remainingActiveAdmins === 0){
@@ -345,9 +349,23 @@ const server = http.createServer(async (req, res)=>{
           return;
         }
       }
-      users[idx].active = body.active;
+
+      if(body.role !== undefined){
+        const newRole = body.role === 'admin' ? 'admin' : 'user';
+        if(newRole !== users[idx].role && users[idx].role === 'admin'){
+          if(id === admin.id){ sendJSON(res, 400, { error: 'Vous ne pouvez pas modifier votre propre rôle.' }); return; }
+          const remainingActiveAdmins = users.filter(u => u.role === 'admin' && u.id !== id && u.active !== false).length;
+          if(remainingActiveAdmins === 0){
+            sendJSON(res, 400, { error: 'Impossible de retirer les droits du dernier compte administrateur actif.' });
+            return;
+          }
+        }
+        users[idx].role = newRole;
+      }
+
+      if(typeof body.active === 'boolean') users[idx].active = body.active;
       writeUsers(users);
-      if(!body.active){
+      if(typeof body.active === 'boolean' && !body.active){
         // invalide les sessions de ce compte pour un effet immédiat
         for(const [token, s] of sessions){ if(s.userId === id) sessions.delete(token); }
       }
@@ -374,6 +392,55 @@ const server = http.createServer(async (req, res)=>{
     // invalide les sessions de ce compte
     for(const [token, s] of sessions){ if(s.userId === id) sessions.delete(token); }
     sendJSON(res, 200, { deleted: true });
+    return;
+  }
+
+  // Un administrateur réinitialise le mot de passe d'un autre compte
+  // (aucun mot de passe actuel requis — c'est un reset admin).
+  const passwordResetMatch = pathname.match(/^\/api\/users\/([^/]+)\/password$/);
+  if(passwordResetMatch && req.method === 'PUT'){
+    const admin = requireAdmin(req, res);
+    if(!admin) return;
+    try{
+      const id = Number(passwordResetMatch[1]);
+      const body = await readBody(req) || {};
+      const newPassword = String(body.newPassword || '');
+      if(newPassword.length < 4){ sendJSON(res, 400, { error: 'Le mot de passe doit contenir au moins 4 caractères.' }); return; }
+      const users = readUsers();
+      const idx = users.findIndex(u => u.id === id);
+      if(idx === -1){ sendJSON(res, 404, { error: 'Compte introuvable.' }); return; }
+      const { salt, hash } = hashPassword(newPassword);
+      users[idx].salt = salt; users[idx].hash = hash;
+      writeUsers(users);
+      // force une reconnexion avec le nouveau mot de passe
+      for(const [token, s] of sessions){ if(s.userId === id) sessions.delete(token); }
+      sendJSON(res, 200, { updated: true });
+    }catch(err){ sendJSON(res, 400, { error: err.message }); }
+    return;
+  }
+
+  // Un utilisateur connecté change lui-même son propre mot de passe
+  // (mot de passe actuel obligatoire, par sécurité).
+  if(pathname === '/api/auth/password' && req.method === 'PUT'){
+    const actor = requireAuth(req, res);
+    if(!actor) return;
+    try{
+      const body = await readBody(req) || {};
+      const currentPassword = String(body.currentPassword || '');
+      const newPassword = String(body.newPassword || '');
+      if(!verifyPassword(currentPassword, actor.salt, actor.hash)){
+        sendJSON(res, 401, { error: 'Mot de passe actuel incorrect.' });
+        return;
+      }
+      if(newPassword.length < 4){ sendJSON(res, 400, { error: 'Le nouveau mot de passe doit contenir au moins 4 caractères.' }); return; }
+      const users = readUsers();
+      const idx = users.findIndex(u => u.id === actor.id);
+      if(idx === -1){ sendJSON(res, 404, { error: 'Compte introuvable.' }); return; }
+      const { salt, hash } = hashPassword(newPassword);
+      users[idx].salt = salt; users[idx].hash = hash;
+      writeUsers(users);
+      sendJSON(res, 200, { updated: true });
+    }catch(err){ sendJSON(res, 400, { error: err.message }); }
     return;
   }
 

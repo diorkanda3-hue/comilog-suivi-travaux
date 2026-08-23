@@ -1418,6 +1418,30 @@
           <tbody id="usersTableBody"></tbody>
         </table>
       </div>
+
+      <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
+        <h3 style="margin-bottom:2px;">🔒 Changer mon mot de passe</h3>
+        <p class="panel-sub" style="margin-bottom:14px;">Valable pour votre propre compte uniquement.</p>
+        <form id="changePasswordForm">
+          <div class="modal-grid">
+            <div class="form-field">
+              <label>Mot de passe actuel</label>
+              <input type="password" id="pwd-current" required autocomplete="current-password">
+            </div>
+            <div class="form-field">
+              <label>Nouveau mot de passe</label>
+              <input type="password" id="pwd-new" required minlength="4" autocomplete="new-password">
+            </div>
+            <div class="form-field">
+              <label>Confirmer le nouveau mot de passe</label>
+              <input type="password" id="pwd-confirm" required minlength="4" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="submit" class="tool-btn primary">Mettre à jour mon mot de passe</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 </div>
@@ -1718,7 +1742,12 @@ async function loadUsersList(){
       return `
       <tr>
         <td class="mono">${escapeHtml(u.username)}${isSelf ? ' (vous)' : ''}</td>
-        <td><span class="user-role-badge ${u.role}">${u.role==='admin' ? 'Administrateur' : 'Utilisateur'}</span></td>
+        <td>
+          <select class="role-select" data-id="${u.id}" ${isSelf ? 'disabled title="Vous ne pouvez pas modifier votre propre rôle"' : ''} style="background:var(--panel); border:1px solid var(--line); color:var(--text); padding:5px 8px; border-radius:6px; font-family:'Inter',sans-serif; font-size:12px;">
+            <option value="user" ${u.role==='user'?'selected':''}>Utilisateur</option>
+            <option value="admin" ${u.role==='admin'?'selected':''}>Administrateur</option>
+          </select>
+        </td>
         <td><span class="user-status ${u.online ? 'online' : 'offline'}"><span class="dot"></span>${u.online ? 'En ligne' : 'Hors ligne'}</span></td>
         <td>
           <span class="account-toggle ${active ? 'active' : ''} ${isSelf ? 'disabled' : ''}" data-id="${u.id}" data-active="${active}" title="${isSelf ? 'Vous ne pouvez pas modifier votre propre compte' : (active ? 'Cliquer pour désactiver' : 'Cliquer pour activer')}">
@@ -1728,11 +1757,31 @@ async function loadUsersList(){
         </td>
         <td>${fmtDateTime(u.createdAt)}</td>
         <td>${u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : 'Jamais connecté'}</td>
-        <td><button type="button" class="row-delete-btn" data-id="${u.id}" title="Supprimer ce compte">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-        </button></td>
+        <td style="display:flex; gap:6px;">
+          <button type="button" class="reset-pwd-btn" data-id="${u.id}" data-username="${escapeHtml(u.username)}" title="Réinitialiser le mot de passe" style="background:transparent; border:1px solid var(--line); color:var(--muted); width:28px; height:28px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </button>
+          <button type="button" class="row-delete-btn" data-id="${u.id}" title="Supprimer ce compte">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </button>
+        </td>
       </tr>`;
     }).join('');
+    document.querySelectorAll('#usersTableBody .role-select:not(:disabled)').forEach(sel=>{
+      sel.dataset.previousValue = sel.value;
+      sel.addEventListener('change', async ()=>{
+        const id = sel.dataset.id;
+        const newRole = sel.value;
+        const label = newRole === 'admin' ? 'administrateur' : 'utilisateur';
+        if(!confirm(`Changer le rôle de ce compte en « ${label} » ?`)){ sel.value = sel.dataset.previousValue; return; }
+        try{
+          const res2 = await apiFetch(`/api/users/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({role: newRole})});
+          const d = await res2.json().catch(()=>({}));
+          if(res2.ok){ showToast('Rôle mis à jour.'); loadUsersList(); }
+          else{ showToast(d.error || 'Modification impossible.', true); sel.value = sel.dataset.previousValue; }
+        }catch(err){ showToast('Serveur injoignable.', true); sel.value = sel.dataset.previousValue; }
+      });
+    });
     document.querySelectorAll('#usersTableBody .account-toggle:not(.disabled)').forEach(el=>{
       el.addEventListener('click', async ()=>{
         const id = el.dataset.id;
@@ -1744,6 +1793,19 @@ async function loadUsersList(){
           const d = await res2.json().catch(()=>({}));
           if(res2.ok){ showToast(nextActive ? 'Compte activé.' : 'Compte désactivé.'); loadUsersList(); }
           else{ showToast(d.error || 'Modification impossible.', true); }
+        }catch(err){ showToast('Serveur injoignable.', true); }
+      });
+    });
+    document.querySelectorAll('#usersTableBody .reset-pwd-btn').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const newPwd = prompt(`Nouveau mot de passe pour « ${btn.dataset.username} » (4 caractères minimum) :`);
+        if(newPwd === null) return;
+        if(newPwd.length < 4){ showToast('Le mot de passe doit contenir au moins 4 caractères.', true); return; }
+        try{
+          const res2 = await apiFetch(`/api/users/${btn.dataset.id}/password`, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({newPassword: newPwd})});
+          const d = await res2.json().catch(()=>({}));
+          if(res2.ok){ showToast(`Mot de passe de « ${btn.dataset.username} » réinitialisé.`); }
+          else{ showToast(d.error || 'Réinitialisation impossible.', true); }
         }catch(err){ showToast('Serveur injoignable.', true); }
       });
     });
@@ -1787,6 +1849,27 @@ document.getElementById('createUserForm').addEventListener('submit', async (e)=>
     document.getElementById('createUserForm').reset();
     document.getElementById('createUserForm').style.display = 'none';
     loadUsersList();
+  }catch(err){
+    showToast('Serveur injoignable.', true);
+  }
+});
+
+document.getElementById('changePasswordForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const currentPassword = document.getElementById('pwd-current').value;
+  const newPassword = document.getElementById('pwd-new').value;
+  const confirmPassword = document.getElementById('pwd-confirm').value;
+  if(newPassword !== confirmPassword){ showToast('Les deux mots de passe ne correspondent pas.', true); return; }
+  if(newPassword.length < 4){ showToast('Le nouveau mot de passe doit contenir au moins 4 caractères.', true); return; }
+  try{
+    const res = await apiFetch('/api/auth/password', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({currentPassword, newPassword}),
+    });
+    const data = await res.json();
+    if(!res.ok){ showToast(data.error || 'Mise à jour impossible.', true); return; }
+    showToast('Votre mot de passe a été mis à jour.');
+    document.getElementById('changePasswordForm').reset();
   }catch(err){
     showToast('Serveur injoignable.', true);
   }
