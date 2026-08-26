@@ -863,6 +863,7 @@
   .action-badge.modification{background:rgba(226,163,62,0.15); color:var(--amber);}
   .action-badge.suppression{background:rgba(226,87,78,0.15); color:var(--red);}
   .action-badge.import{background:rgba(78,151,217,0.15); color:var(--blue);}
+  .action-badge.restauration{background:rgba(156,135,214,0.18); color:var(--purple);}
 
   /* ---------- PRINT ---------- */
   @media print{
@@ -1430,6 +1431,29 @@
       </div>
 
       <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
+        <h3 style="margin-bottom:2px;">💾 Sauvegarde des données</h3>
+        <p class="panel-sub" style="margin-bottom:14px;">Téléchargez une copie complète (dossiers, comptes, historique) sur votre ordinateur — à faire régulièrement, notamment avant tout redéploiement.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button type="button" class="tool-btn primary" id="btnDownloadBackup">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Télécharger une sauvegarde
+          </button>
+          <button type="button" class="tool-btn" id="btnShowRestore">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Restaurer une sauvegarde
+          </button>
+          <input type="file" id="restoreFileInput" accept=".json" style="display:none;">
+        </div>
+        <div id="restoreWarning" style="display:none; margin-top:14px; background:rgba(226,87,78,0.1); border:1px solid var(--red); border-radius:8px; padding:12px 14px;">
+          <p class="sidebar-text" style="margin:0 0 10px; color:var(--text);">⚠️ Attention : restaurer une sauvegarde <strong>remplace entièrement</strong> les dossiers, comptes et historique actuels. Tout le monde devra se reconnecter ensuite. Choisissez le fichier de sauvegarde (.json) à restaurer :</p>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button type="button" class="tool-btn danger" id="btnPickRestoreFile" style="border-color:var(--red); color:var(--red);">Choisir le fichier et restaurer</button>
+            <button type="button" class="reset-btn" id="btnCancelRestore">Annuler</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
         <h3 style="margin-bottom:2px;">🔒 Changer mon mot de passe</h3>
         <p class="panel-sub" style="margin-bottom:14px;">Valable pour votre propre compte uniquement.</p>
         <form id="changePasswordForm">
@@ -1716,7 +1740,7 @@ document.getElementById('navHistoryLink').addEventListener('click', (e)=>{ e.pre
 document.getElementById('btnCloseHistoryModal').addEventListener('click', closeHistoryModal);
 historyModal.addEventListener('click', (e)=>{ if(e.target === historyModal) closeHistoryModal(); });
 
-const ACTION_LABELS = { ajout:'Ajout', modification:'Modification', suppression:'Suppression', import:'Import Excel' };
+const ACTION_LABELS = { ajout:'Ajout', modification:'Modification', suppression:'Suppression', import:'Import Excel', restauration:'Restauration sauvegarde' };
 async function loadHistory(){
   try{
     const res = await apiFetch('/api/activity');
@@ -1890,6 +1914,62 @@ document.getElementById('createUserForm').addEventListener('submit', async (e)=>
     loadUsersList();
   }catch(err){
     showToast('Serveur injoignable.', true);
+  }
+});
+
+// =========================================================
+// SAUVEGARDE / RESTAURATION
+// =========================================================
+document.getElementById('btnDownloadBackup').addEventListener('click', async ()=>{
+  try{
+    const res = await apiFetch('/api/backup');
+    if(!res.ok){ showToast('Impossible de générer la sauvegarde.', true); return; }
+    const backup = await res.json();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    a.href = url; a.download = `sauvegarde-suivi-travaux-${stamp}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Sauvegarde téléchargée (${backup.dossiers.length} dossier(s), ${backup.users.length} compte(s)).`);
+  }catch(err){
+    showToast('Serveur injoignable.', true);
+  }
+});
+
+document.getElementById('btnShowRestore').addEventListener('click', ()=>{
+  document.getElementById('restoreWarning').style.display = 'block';
+});
+document.getElementById('btnCancelRestore').addEventListener('click', ()=>{
+  document.getElementById('restoreWarning').style.display = 'none';
+});
+document.getElementById('btnPickRestoreFile').addEventListener('click', ()=>{
+  document.getElementById('restoreFileInput').click();
+});
+document.getElementById('restoreFileInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  if(!confirm('Cette action va remplacer TOUS les dossiers, comptes et l\'historique actuels par le contenu de ce fichier. Tout le monde devra se reconnecter. Continuer ?')){
+    e.target.value = '';
+    return;
+  }
+  try{
+    const text = await file.text();
+    const backup = JSON.parse(text);
+    const res = await apiFetch('/api/restore', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(backup),
+    });
+    const data = await res.json();
+    if(!res.ok){ showToast(data.error || 'Restauration impossible.', true); return; }
+    showToast(`Sauvegarde restaurée : ${data.dossiers} dossier(s), ${data.users} compte(s). Reconnexion nécessaire.`);
+    document.getElementById('restoreWarning').style.display = 'none';
+    setTimeout(()=>{ handleUnauthorized(); }, 1500);
+  }catch(err){
+    showToast("Fichier invalide ou serveur injoignable.", true);
+  }finally{
+    e.target.value = '';
   }
 });
 
