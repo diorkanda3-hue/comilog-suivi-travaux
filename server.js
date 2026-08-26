@@ -536,8 +536,42 @@ const server = http.createServer(async (req, res)=>{
   sendJSON(res, 405, { error: 'Méthode non autorisée' });
 });
 
+// ============================================================
+// Réinitialisation d'urgence d'un compte administrateur
+// ------------------------------------------------------------
+// Si les variables d'environnement ADMIN_RESET_USERNAME et
+// ADMIN_RESET_PASSWORD sont définies (par ex. sur Render, onglet
+// "Environment"), le compte correspondant est créé — ou son mot de
+// passe réinitialisé et ses droits admin restaurés s'il existe déjà —
+// à chaque démarrage du serveur. Pratique pour retrouver l'accès en
+// cas de mot de passe oublié, sans effacer les autres comptes ni les
+// dossiers. Pensez à retirer ces variables une fois reconnecté, pour
+// ne pas laisser un mot de passe en clair dans la configuration.
+// ============================================================
+function applyAdminResetFromEnv(){
+  const username = process.env.ADMIN_RESET_USERNAME;
+  const password = process.env.ADMIN_RESET_PASSWORD;
+  if(!username || !password) return;
+  if(password.length < 4){
+    console.log('  [ADMIN_RESET] Ignoré : ADMIN_RESET_PASSWORD doit contenir au moins 4 caractères.');
+    return;
+  }
+  const users = readUsers();
+  const { salt, hash } = hashPassword(password);
+  const idx = users.findIndex(u => u.username.toLowerCase() === username.toLowerCase());
+  if(idx === -1){
+    users.push({ id: nextId(), username, fullName: null, salt, hash, role: 'admin', createdAt: new Date().toISOString(), lastLoginAt: null, active: true });
+    console.log(`  [ADMIN_RESET] Compte administrateur « ${username} » créé.`);
+  }else{
+    users[idx].salt = salt; users[idx].hash = hash; users[idx].role = 'admin'; users[idx].active = true;
+    console.log(`  [ADMIN_RESET] Compte « ${username} » réinitialisé (mot de passe + droits admin).`);
+  }
+  writeUsers(users);
+}
+
 server.listen(PORT, '0.0.0.0', ()=>{
   ensureDataFiles();
+  applyAdminResetFromEnv();
   const dossierCount = readDossiers().length;
   const userCount = readUsers().length;
   const os = require('os');
