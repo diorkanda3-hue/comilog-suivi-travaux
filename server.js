@@ -522,6 +522,47 @@ const server = http.createServer(async (req, res)=>{
     return;
   }
 
+  // ---------------- SAUVEGARDE / RESTAURATION (réservé aux administrateurs) ----------------
+  // Permet de télécharger une copie complète de toutes les données
+  // (dossiers, comptes, historique) sur son propre ordinateur, et de
+  // la recharger plus tard si besoin — indépendamment de ce qui se
+  // passe côté hébergeur (utile notamment sur l'offre gratuite de
+  // Render, où le stockage n'est pas toujours garanti permanent).
+  if(pathname === '/api/backup' && req.method === 'GET'){
+    const admin = requireAdmin(req, res);
+    if(!admin) return;
+    sendJSON(res, 200, {
+      exportedAt: new Date().toISOString(),
+      exportedBy: admin.username,
+      dossiers: readDossiers(),
+      users: readUsers(),
+      activity: readActivity(),
+    });
+    return;
+  }
+
+  if(pathname === '/api/restore' && req.method === 'POST'){
+    const admin = requireAdmin(req, res);
+    if(!admin) return;
+    try{
+      const body = await readBody(req) || {};
+      if(!Array.isArray(body.dossiers) || !Array.isArray(body.users)){
+        sendJSON(res, 400, { error: 'Fichier de sauvegarde invalide (dossiers et users manquants).' });
+        return;
+      }
+      writeDossiers(body.dossiers);
+      writeUsers(body.users);
+      if(Array.isArray(body.activity)) writeJSON(ACTIVITY_FILE, body.activity);
+      // Toutes les sessions en cours sont invalidées : la liste des
+      // comptes ayant potentiellement changé, mieux vaut que tout le
+      // monde se reconnecte proprement après une restauration.
+      sessions.clear();
+      logActivity(admin.username, 'restauration', `Sauvegarde restaurée (${body.dossiers.length} dossier(s), ${body.users.length} compte(s))`);
+      sendJSON(res, 200, { restored: true, dossiers: body.dossiers.length, users: body.users.length });
+    }catch(err){ sendJSON(res, 400, { error: err.message }); }
+    return;
+  }
+
   if(pathname === '/api/health' && req.method === 'GET'){
     sendJSON(res, 200, { status: 'ok', dossiers: readDossiers().length, users: readUsers().length });
     return;
