@@ -1037,6 +1037,31 @@
   <p class="kpi-group-title">Performance &amp; qualité</p>
   <div class="kpi-row" id="kpiRowPerformance"></div>
 
+  <div class="panel table-panel" style="margin-bottom:16px;">
+    <div class="table-header-row" style="margin-bottom:10px;">
+      <div>
+        <h3 style="margin-bottom:2px;">👷 Suivi par prestataire et par mois</h3>
+        <p class="panel-sub" style="margin-bottom:0;">Nombre d'OT, coût cumulé et durée de traitement, par prestataire — respecte les filtres actifs</p>
+      </div>
+      <span class="count-tag" id="prestMonthCount"></span>
+    </div>
+    <div class="table-scroll" style="max-height:420px;">
+      <table>
+        <thead>
+          <tr>
+            <th style="cursor:default;">Mois</th>
+            <th style="cursor:default;">Prestataire</th>
+            <th style="cursor:default;">Nombre d'OT</th>
+            <th style="cursor:default;">Coût cumulé (FCFA)</th>
+            <th style="cursor:default;">Durée moyenne (jours)</th>
+            <th style="cursor:default;">Durée totale (jours)</th>
+          </tr>
+        </thead>
+        <tbody id="prestMonthTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="grid" id="chartsSection">
     <div class="panel">
       <h3>Coût final par type de travaux</h3>
@@ -1072,31 +1097,6 @@
     <h3>Types de travaux par mois</h3>
     <p class="panel-sub">Nombre d'ordres de travail par type, réparti par mois — utilisez le filtre « Mois » pour isoler une période</p>
     <div class="chart-wrap tall"><canvas id="chartTypeMonth"></canvas></div>
-  </div>
-
-  <div class="panel table-panel" style="margin-bottom:16px;">
-    <div class="table-header-row" style="margin-bottom:10px;">
-      <div>
-        <h3 style="margin-bottom:2px;">👷 Suivi par prestataire et par mois</h3>
-        <p class="panel-sub" style="margin-bottom:0;">Nombre d'OT, coût cumulé et durée de traitement, par prestataire — respecte les filtres actifs</p>
-      </div>
-      <span class="count-tag" id="prestMonthCount"></span>
-    </div>
-    <div class="table-scroll" style="max-height:420px;">
-      <table>
-        <thead>
-          <tr>
-            <th style="cursor:default;">Mois</th>
-            <th style="cursor:default;">Prestataire</th>
-            <th style="cursor:default;">Nombre d'OT</th>
-            <th style="cursor:default;">Coût cumulé (FCFA)</th>
-            <th style="cursor:default;">Durée moyenne (jours)</th>
-            <th style="cursor:default;">Durée totale (jours)</th>
-          </tr>
-        </thead>
-        <tbody id="prestMonthTableBody"></tbody>
-      </table>
-    </div>
   </div>
 
   <div class="panel table-panel" id="gestionDossiers">
@@ -3075,3 +3075,4 @@ initAuthScreen();
 </script>
 </body>
 </html>
+
