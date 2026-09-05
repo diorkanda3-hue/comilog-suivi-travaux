@@ -1,136 +1,3077 @@
-# Suivi Travaux Patrimoine — Mini serveur avec comptes utilisateurs
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Suivi Travaux — Patrimoine 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script>
+  // Chargement résilient des librairies externes : essaie plusieurs CDN,
+  // et n'empêche jamais le reste de l'application de fonctionner en cas d'échec.
+  function __loadScript(urls){
+    return new Promise((resolve, reject)=>{
+      let i = 0;
+      function tryNext(){
+        if(i >= urls.length){ reject(new Error('Toutes les sources ont échoué: '+urls.join(', '))); return; }
+        const url = urls[i++];
+        const s = document.createElement('script');
+        s.src = url;
+        s.onload = ()=>resolve(url);
+        s.onerror = ()=>{ s.remove(); tryNext(); };
+        document.head.appendChild(s);
+      }
+      tryNext();
+    });
+  }
+  window.__libsReady = Promise.allSettled([
+    __loadScript([
+      'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js',
+      'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
+      'https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js'
+    ]),
+    __loadScript([
+      'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+      'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+      'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js'
+    ]),
+  ]);
+</script>
+<style>
+  :root{
+    --bg:#0F1319;
+    --panel:#171D25;
+    --panel-2:#1D2530;
+    --line:#283240;
+    --text:#EDF2F6;
+    --muted:#8D9BAA;
+    --amber:#E2A33E;
+    --amber-dim:#4a3a1f;
+    --teal:#3FB6A8;
+    --green:#4CAF7C;
+    --red:#E2574E;
+    --blue:#4E97D9;
+    --purple:#9C87D6;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(1200px 500px at 10% -10%, #1c2530 0%, transparent 60%),
+      var(--bg);
+    color:var(--text);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  .display{font-family:'Space Grotesk',sans-serif;}
 
-Cette version connecte l'application **Suivi Travaux Patrimoine** à un
-mini serveur Node.js qui :
-- conserve tous les dossiers (ajouts, modifications, suppressions) de
-  façon permanente dans `data/dossiers.json`
-- gère des **comptes utilisateurs** avec connexion par identifiant et
-  mot de passe
-- propose une **zone d'administration** (réservée aux comptes admin)
-  pour créer et supprimer les comptes des personnes autorisées à
-  utiliser l'application
+  /* ---------- APP SHELL / SIDEBAR ---------- */
+  .app-shell{
+    display:flex;
+    align-items:flex-start;
+    min-height:100vh;
+  }
+  .sidebar{
+    width:250px;
+    flex-shrink:0;
+    background:var(--panel);
+    border-right:1px solid var(--line);
+    padding:22px 18px 18px;
+    position:sticky;
+    top:0;
+    height:100vh;
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+  }
+  .app-content{
+    flex:1;
+    min-width:0;
+  }
+  .sidebar-logo{margin-bottom:6px;}
+  .sidebar-logo .logo-badge{width:fit-content;}
+  .sidebar-heading{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:20px 0 8px;
+  }
+  .sidebar-nav{display:flex;flex-direction:column;gap:2px;}
+  .sidebar-nav a{
+    color:var(--text);
+    text-decoration:none;
+    font-size:13px;
+    padding:8px 10px;
+    border-radius:7px;
+    transition:background .15s, color .15s;
+  }
+  .sidebar-nav a:hover{background:var(--panel-2); color:var(--amber);}
+  .sidebar-legend{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:9px;}
+  .sidebar-legend li{
+    display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text);
+    cursor:pointer; padding:5px 7px; margin:0 -7px; border-radius:6px;
+    transition:background .15s, color .15s;
+  }
+  .sidebar-legend li:hover{background:var(--panel-2);}
+  .sidebar-legend li.active{background:var(--panel-2); color:var(--amber); font-weight:600;}
+  .sidebar-legend .dot{width:9px;height:9px;border-radius:50%; flex-shrink:0;}
+  .legend-hint{font-size:9px; text-transform:none; letter-spacing:0; color:var(--muted); opacity:0.7;}
+  .sidebar-text{font-size:12px; color:var(--muted); line-height:1.55; margin:0;}
+  .sidebar-footer{margin-top:auto; padding-top:18px; border-top:1px solid var(--line);}
 
-Aucune dépendance à installer (`npm install` non nécessaire) : tout
-repose sur les briques natives de Node.js, y compris le hachage des
-mots de passe (scrypt) et la gestion des sessions.
+  @media(max-width:900px){
+    .app-shell{flex-direction:column;}
+    .sidebar{
+      width:100%;
+      height:auto;
+      position:static;
+      border-right:none;
+      border-bottom:1px solid var(--line);
+      flex-direction:row;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:14px;
+      padding:14px 18px;
+    }
+    .sidebar-logo{margin-bottom:0;}
+    .sidebar-heading, .sidebar-legend, .sidebar-text, .sidebar-footer{display:none;}
+    .sidebar-nav{flex-direction:row; flex-wrap:wrap;}
+  }
 
-## 🚀 Installation en un clic
+  /* ---------- HEADER ---------- */
+  header{
+    padding:28px 32px 20px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    flex-wrap:wrap;
+    gap:16px;
+    position:sticky;
+    top:0;
+    background:rgba(18,22,27,0.92);
+    backdrop-filter:blur(10px);
+    z-index:50;
+  }
+  .logo-badge{
+    background:#fff;
+    border-radius:8px;
+    padding:6px 10px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-shrink:0;
+    box-shadow:0 1px 3px rgba(0,0,0,0.3);
+  }
+  .logo-badge img{
+    height:34px;
+    width:auto;
+    display:block;
+  }
+  .logo-badge.logo-fallback{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    box-shadow:none;
+    padding:8px 12px;
+  }
+  .logo-badge.logo-fallback::before{
+    content:"COMILOG";
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:700;
+    font-size:15px;
+    letter-spacing:0.02em;
+    color:var(--amber);
+  }
+  .brand-eyebrow{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--amber);
+    margin:0 0 6px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .brand-eyebrow .dot{
+    width:6px;height:6px;border-radius:50%;background:var(--amber);
+    box-shadow:0 0 8px var(--amber);
+    animation:pulse 2.2s infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+  h1{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:26px;
+    font-weight:700;
+    margin:0;
+    letter-spacing:-0.01em;
+  }
+  .subtitle{color:var(--muted);font-size:13px;margin-top:4px;}
 
-- **Windows** : double-cliquez sur `setup_windows.bat`
-- **macOS / Linux** : lancez `./setup_mac_linux.sh`
+  .refresh-tag{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--muted);
+    text-align:right;
+  }
 
-Le script installe l'application dans un dossier permanent, crée un
-raccourci sur le Bureau, démarre le serveur et ouvre le navigateur.
+  /* ---------- FILTER BAR ---------- */
+  .filters{
+    display:flex;
+    gap:10px;
+    padding:16px 32px;
+    flex-wrap:wrap;
+    border-bottom:1px solid var(--line);
+    background:rgba(26,32,39,0.4);
+  }
+  .filters select, .filters input[type=text]{
+    background:var(--panel);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:9px 12px;
+    border-radius:8px;
+    font-family:'Inter',sans-serif;
+    font-size:13px;
+    outline:none;
+    transition:border-color .15s;
+    min-width:150px;
+  }
+  .filters select:focus, .filters input:focus{border-color:var(--amber);}
+  .filters label{
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:var(--muted);
+    display:block;
+    margin-bottom:4px;
+  }
+  .filter-group{display:flex;flex-direction:column;}
 
-## Premier lancement — créer le compte administrateur
+  /* ---------- MULTI-SELECT FILTERS ---------- */
+  #filtersMultiselects{display:flex; gap:10px; flex-wrap:wrap;}
+  .filter-group.msel{position:relative;}
+  .msel-btn{
+    background:var(--panel);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:9px 12px;
+    border-radius:8px;
+    font-size:13px;
+    font-family:'Inter',sans-serif;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    min-width:150px;
+    max-width:200px;
+    text-align:left;
+    transition:border-color .15s, color .15s;
+  }
+  .msel-btn:hover{border-color:var(--amber);}
+  .msel-btn.active{border-color:var(--amber); color:var(--amber);}
+  .msel-btn svg{flex-shrink:0; opacity:.6; transition:transform .15s;}
+  .msel-btn[aria-expanded="true"] svg{transform:rotate(180deg);}
+  .msel-btn-label{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .msel-panel{
+    display:none;
+    position:absolute;
+    top:calc(100% + 6px);
+    left:0;
+    z-index:90;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    width:240px;
+    box-shadow:0 12px 32px rgba(0,0,0,0.45);
+    padding:8px;
+  }
+  .msel-panel.open{display:block;}
+  .msel-search input{
+    width:100%;
+    background:var(--panel);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:7px 9px;
+    border-radius:6px;
+    font-size:12.5px;
+    margin-bottom:6px;
+    outline:none;
+    font-family:'Inter',sans-serif;
+  }
+  .msel-search input:focus{border-color:var(--amber);}
+  .msel-actions-top{display:flex; gap:8px; margin-bottom:6px;}
+  .msel-mini-btn{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--muted);
+    font-size:10.5px;
+    padding:3px 9px;
+    border-radius:12px;
+    cursor:pointer;
+    font-family:'Inter',sans-serif;
+  }
+  .msel-mini-btn:hover{border-color:var(--amber); color:var(--amber);}
+  .msel-options{max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:1px;}
+  .msel-option{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:6px 6px;
+    border-radius:5px;
+    font-size:12.5px;
+    color:var(--text);
+    cursor:pointer;
+  }
+  .msel-option:hover{background:var(--panel);}
+  .msel-option input{accent-color:var(--amber); cursor:pointer; flex-shrink:0;}
+  .msel-option span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .msel-empty{font-size:12px; color:var(--muted); padding:8px 6px;}
+  .reset-btn{
+    align-self:flex-end;
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--muted);
+    padding:9px 14px;
+    border-radius:8px;
+    font-size:13px;
+    cursor:pointer;
+    transition:all .15s;
+    height:fit-content;
+  }
+  .reset-btn:hover{border-color:var(--red);color:var(--red);}
+  #activeFilterCount{
+    display:inline-block;
+    background:var(--amber);
+    color:#1a1305;
+    font-size:10px;
+    font-weight:700;
+    padding:1px 6px;
+    border-radius:10px;
+    margin-left:5px;
+  }
+  #activeFilterCount:empty{display:none;}
+  .filter-count-badge{
+    display:inline-block;
+    background:var(--amber);
+    color:#1a1305;
+    font-size:10px;
+    font-weight:700;
+    padding:1px 6px;
+    border-radius:10px;
+    margin-left:4px;
+  }
+  .filter-count-badge:empty{display:none;}
+  .filters.collapsed{display:none;}
+  #btnToggleFilters.active{border-color:var(--amber); color:var(--amber);}
 
-À la toute première ouverture, **aucun compte n'existe encore**.
-L'écran de connexion vous propose alors de **créer le premier
-compte** — il devient automatiquement administrateur.
+  /* ---------- MAIN ---------- */
+  main{padding:24px 32px 60px;max-width:1500px;margin:0 auto;}
 
-C'est avec ce compte que vous pourrez ensuite créer un compte pour
-chaque personne qui doit utiliser l'application : cliquez sur le
-bouton **« Administration »** en haut de l'application (visible
-uniquement pour les comptes administrateur).
+  /* ---------- KPI TICKETS ---------- */
+  .dashboard-title{margin-bottom:18px;}
+  .dashboard-title h2{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:19px; font-weight:700; margin:0 0 3px;
+    letter-spacing:-0.01em;
+  }
+  .kpi-group-title{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--amber);
+    margin:22px 0 10px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .kpi-group-title.first{margin-top:0;}
+  .kpi-group-title::after{
+    content:"";
+    flex:1;
+    height:1px;
+    background:var(--line);
+  }
+  .kpi-row{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+    gap:14px;
+    margin-bottom:28px;
+  }
+  .kpi-ticket{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:16px 18px;
+    position:relative;
+    overflow:hidden;
+  }
+  .kpi-ticket::before{
+    content:"";
+    position:absolute;
+    top:0;left:0;right:0;height:3px;
+    background:var(--accent,var(--amber));
+  }
+  .kpi-ticket .stub-label{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--muted);
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .kpi-ticket .stub-num{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:9px;
+    color:#4a5361;
+  }
+  .kpi-ticket .kpi-value{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:30px;
+    font-weight:700;
+    margin-top:8px;
+    letter-spacing:-0.02em;
+  }
+  .kpi-ticket .kpi-value small{font-size:14px;color:var(--muted);font-weight:500;margin-left:2px;}
+  .kpi-ticket .kpi-sub{font-size:12px;color:var(--muted);margin-top:6px;}
+  .kpi-ticket .kpi-sub.up{color:var(--green);}
+  .kpi-ticket .kpi-sub.down{color:var(--red);}
 
-## Gestion des comptes (zone Administration)
+  /* ---------- INDICATEURS DE TRAVAUX (feu tricolore) ---------- */
+  .indicator-row{grid-template-columns:repeat(3,1fr);}
+  .indicator-ticket{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:18px 20px;
+    position:relative;
+    overflow:hidden;
+    display:flex;
+    align-items:center;
+    gap:16px;
+  }
+  .indicator-ticket::before{
+    content:"";
+    position:absolute;
+    top:0;left:0;right:0;height:3px;
+    background:var(--accent);
+  }
+  .indicator-signal{
+    width:16px;height:16px;
+    border-radius:50%;
+    flex-shrink:0;
+    background:var(--accent);
+    box-shadow:0 0 0 5px color-mix(in srgb, var(--accent) 18%, transparent), 0 0 14px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+  .indicator-body{min-width:0;}
+  .indicator-label{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+  .indicator-value{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:26px;
+    font-weight:700;
+    letter-spacing:-0.02em;
+    line-height:1.2;
+  }
+  .indicator-sub{font-size:12px; color:var(--muted); margin-top:2px;}
+  @media(max-width:700px){.indicator-row{grid-template-columns:1fr;}}
 
-Dans la fenêtre d'administration :
-- **« Nouveau compte »** : créez un identifiant, un mot de passe (4
-  caractères minimum), et choisissez le rôle :
-  - **Utilisateur** : peut consulter et modifier les dossiers
-  - **Administrateur** : peut en plus créer/supprimer des comptes
-- Chaque compte peut être **supprimé** individuellement (sauf le
-  vôtre, et sauf le dernier compte administrateur restant — pour
-  éviter de vous retrouver bloqué sans accès à l'administration)
+  /* ---------- ALERTES ---------- */
+  .alertes-list{max-height:320px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;}
+  .alerte-item{
+    display:flex; align-items:center; gap:12px;
+    background:var(--panel-2); border:1px solid var(--line); border-left:3px solid var(--accent, var(--red));
+    border-radius:7px; padding:10px 12px; cursor:pointer; transition:background .15s, border-color .15s;
+  }
+  .alerte-item:hover{background:#232c38; border-color:var(--amber);}
+  .alerte-ot{font-family:'IBM Plex Mono',monospace; color:var(--amber); font-size:12.5px; flex-shrink:0; width:100px;}
+  .alerte-info{flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;}
+  .alerte-title{font-size:13px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .alerte-meta{font-size:11px; color:var(--muted);}
+  .alerte-days{
+    flex-shrink:0; text-align:right; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px;
+    color:var(--accent, var(--red)); min-width:70px;
+  }
+  .alerte-days small{display:block; font-family:'Inter',sans-serif; font-weight:400; font-size:9.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;}
+  .alertes-empty{padding:24px; text-align:center; color:var(--muted); font-size:13px;}
+  .alertes-more{text-align:center; padding:8px; font-size:11.5px; color:var(--muted);}
 
-## Sécurité — ce qu'il faut savoir
+  /* ---------- PANELS / CHARTS ---------- */
+  .grid{
+    display:grid;
+    grid-template-columns:1.3fr 1fr;
+    gap:16px;
+    margin-bottom:16px;
+  }
+  .grid3{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:16px;
+    margin-bottom:16px;
+  }
+  @media(max-width:900px){.grid,.grid3{grid-template-columns:1fr;}}
 
-- Les mots de passe sont **hachés** (jamais stockés en clair), avec
-  l'algorithme scrypt intégré à Node.js
-- Chaque connexion génère un **jeton de session** valable 12 heures,
-  gardé en mémoire côté serveur — si le serveur redémarre, tout le
-  monde doit se reconnecter (comportement volontairement simple)
-- ⚠️ Ce système est adapté à un **usage interne, sur un réseau de
-  confiance** (bureau, intranet). Il ne remplace pas une
-  authentification d'entreprise complète (pas de HTTPS forcé, pas de
-  limitation de tentatives de connexion, pas de récupération de mot
-  de passe oublié). Pour un déploiement plus large ou plus exposé,
-  ces points mériteraient d'être renforcés — dites-le-moi si c'est
-  votre cas.
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:18px 20px 14px;
+  }
+  .panel h3{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:14px;
+    font-weight:600;
+    margin:0 0 2px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .panel .panel-sub{font-size:11px;color:var(--muted);margin-bottom:14px;}
+  .chart-wrap{position:relative;height:260px;}
+  .chart-wrap.tall{height:320px;}
 
-## 🌐 Lien permanent, accessible depuis n'importe quel réseau
+  /* ---------- TABLE ---------- */
+  .table-panel{margin-top:8px;}
+  .table-scroll{overflow-x:auto;max-height:560px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  thead th{
+    position:sticky;top:0;
+    background:var(--panel-2);
+    text-align:left;
+    padding:10px 12px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--muted);
+    border-bottom:1px solid var(--line);
+    cursor:pointer;
+    user-select:none;
+    white-space:nowrap;
+  }
+  thead th:hover{color:var(--amber);}
+  tbody td{
+    padding:9px 12px;
+    border-bottom:1px solid var(--line);
+    white-space:nowrap;
+    color:var(--text);
+  }
+  tbody tr:hover{background:var(--panel-2);}
+  .ot-cell{font-family:'IBM Plex Mono',monospace;color:var(--amber);}
+  .badge{
+    display:inline-block;
+    padding:3px 9px;
+    border-radius:20px;
+    font-size:11px;
+    font-weight:500;
+    white-space:nowrap;
+  }
+  .badge.ok{background:rgba(76,175,124,0.15);color:var(--green);}
+  .badge.wait{background:rgba(226,163,62,0.15);color:var(--amber);}
+  .badge.type{background:rgba(78,151,217,0.15);color:var(--blue);}
+  .badge.indic{display:inline-flex; align-items:center; gap:6px;}
+  .badge.indic .indic-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0;}
+  .badge.indic-attente{background:rgba(226,87,78,0.15);color:var(--red);}
+  .badge.indic-encours{background:rgba(226,163,62,0.15);color:var(--amber);}
+  .badge.indic-solde{background:rgba(76,175,124,0.15);color:var(--green);}
+  .partner-tag{
+    display:inline-flex; align-items:center; gap:4px;
+    font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+    background:rgba(156,135,214,0.18); color:var(--purple);
+    padding:2px 7px; border-radius:10px; margin-left:6px; vertical-align:middle;
+    white-space:nowrap;
+  }
 
-Le lien ngrok fonctionne bien pour un test rapide, mais il a deux limites :
-il **change à chaque redémarrage**, et **votre ordinateur doit rester
-allumé** avec le serveur qui tourne en permanence.
+  .table-header-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;}
+  .search-box{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:8px 12px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    min-width:260px;
+  }
+  .search-box input{
+    background:transparent;border:none;outline:none;color:var(--text);font-size:13px;width:100%;
+    font-family:'Inter',sans-serif;
+  }
+  .search-box svg{opacity:0.5;flex-shrink:0;}
+  .count-tag{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);}
 
-Pour un **lien fixe, permanent**, accessible depuis n'importe quel
-réseau, même ordinateur éteint, déployez ce projet sur **Render.com**
-(offre gratuite, sans carte bancaire) :
+  footer{
+    text-align:center;
+    padding:28px;
+    color:var(--muted);
+    font-size:11px;
+    font-family:'IBM Plex Mono',monospace;
+    border-top:1px solid var(--line);
+  }
 
-1. Créez un compte sur [render.com](https://render.com)
-2. Mettez ce dossier dans un dépôt Git (GitHub) :
-   - Créez un compte gratuit sur [github.com](https://github.com) si
-     besoin
-   - Créez un nouveau dépôt (bouton **New repository**), laissez-le
-     public
-   - Sur la page du dépôt vide, cliquez sur **« uploading an existing
-     file »** et glissez-y tout le contenu de ce dossier (server.js,
-     package.json, render.yaml, Procfile, dossiers `public/` et
-     `data/`)
-3. Sur Render : **New +** → **Web Service**, choisissez ce dépôt
-4. Render détecte automatiquement `render.yaml` — vérifiez juste que
-   le plan **Free** est sélectionné, puis **Create Web Service**
-5. En 1-2 minutes, vous obtenez un lien fixe du type :
-   `https://comilog-suivi-travaux.onrender.com`
+  ::-webkit-scrollbar{width:8px;height:8px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:#333c47;border-radius:4px;}
 
-**C'est ce lien-là** que vous partagez définitivement à tous vos
-utilisateurs — plus besoin de relancer quoi que ce soit sur votre
-ordinateur.
+  .empty-state{
+    padding:40px;text-align:center;color:var(--muted);font-size:13px;
+  }
+  .chart-fallback{
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    color:var(--muted);
+    font-size:12.5px;
+    padding:20px;
+    border:1px dashed var(--line);
+    border-radius:8px;
+    line-height:1.5;
+  }
 
-⚠️ **Point important** : sur l'offre gratuite de Render, le disque de
-stockage est *temporaire* — les comptes et dossiers ajoutés peuvent
-être réinitialisés lors d'un redéploiement ou après une longue
-période d'inactivité. Pour une conservation garantie des données en
-usage professionnel continu, il faut soit :
-- ajouter un disque persistant chez Render (quelques dollars/mois),
-- soit héberger sur l'infrastructure interne de Comilog (serveur
-  intranet), à voir avec votre service informatique — c'est la
-  solution la plus sûre pour des données d'entreprise sensibles.
+  /* ---------- LIGNE CLIQUABLE / DÉTAIL ---------- */
+  tbody tr.data-row{cursor:pointer;}
+  .row-actions{display:flex; gap:6px; cursor:default;}
+  .row-view-btn, .row-delete-btn{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--muted);
+    width:28px;height:28px;
+    border-radius:6px;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    transition:all .15s;
+    flex-shrink:0;
+  }
+  .row-view-btn:hover{border-color:var(--blue);color:var(--blue);background:rgba(78,151,217,0.1);}
+  .row-delete-btn:hover{border-color:var(--red);color:var(--red);background:rgba(225,97,90,0.1);}
+  .ot-cell{cursor:pointer;}
+  .ot-cell:hover{text-decoration:underline;}
 
-Dites-moi si vous voulez de l'aide pour l'une de ces deux options.
+  /* ---------- MODAL: DÉTAIL DU DOSSIER (lecture seule) ---------- */
+  .detail-body{padding:20px 22px 22px;}
+  .detail-field{display:flex; flex-direction:column; gap:4px;}
+  .detail-field.span2{grid-column:1 / -1;}
+  .detail-label{
+    font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted);
+    font-family:'IBM Plex Mono',monospace;
+  }
+  .detail-value{font-size:13.5px; color:var(--text); line-height:1.4; word-break:break-word;}
+  .detail-edit-indic{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:14px 16px;
+    margin-bottom:18px;
+  }
+  .detail-edit-indic label{
+    font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);
+    display:block; margin-bottom:8px;
+  }
+  .detail-edit-indic-row{display:flex; gap:10px; flex-wrap:wrap;}
+  .detail-edit-indic select{
+    width:100%;
+    background:var(--panel); border:1px solid var(--line); color:var(--text);
+    padding:9px 11px; border-radius:7px; font-family:'Inter',sans-serif; font-size:13px;
+  }
+  .detail-edit-hint{font-size:11.5px; color:var(--muted); margin:8px 0 0;}
 
-## Démarrage manuel (alternative au script d'installation)
+  /* ---------- MODAL: AJOUTER DOSSIER ---------- */
+  .modal-overlay{
+    position:fixed; inset:0;
+    background:rgba(10,12,15,0.72);
+    backdrop-filter:blur(3px);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    z-index:200;
+    padding:20px;
+  }
+  .modal-overlay.show{display:flex;}
+  .modal-box{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:12px;
+    width:100%;
+    max-width:720px;
+    max-height:88vh;
+    overflow-y:auto;
+    box-shadow:0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:18px 22px;
+    border-bottom:1px solid var(--line);
+    position:sticky; top:0;
+    background:var(--panel);
+    z-index:2;
+  }
+  .modal-head h3{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:16px; margin:0; font-weight:600;
+  }
+  .modal-close{
+    background:transparent; border:none; color:var(--muted);
+    font-size:22px; line-height:1; cursor:pointer; padding:2px 6px; border-radius:6px;
+  }
+  .modal-close:hover{color:var(--red); background:rgba(225,97,90,0.1);}
+  #dossierForm{padding:20px 22px 22px;}
+  .modal-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:14px 16px;
+  }
+  @media(max-width:560px){.modal-grid{grid-template-columns:1fr;}}
+  .form-field{display:flex; flex-direction:column; gap:5px;}
+  .form-field.span2{grid-column:1 / -1;}
+  .form-field label{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);}
+  .form-field .req{color:var(--red);}
+  .form-field input{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:9px 11px;
+    border-radius:7px;
+    font-family:'Inter',sans-serif;
+    font-size:13px;
+    outline:none;
+    width:100%;
+  }
+  .form-field input:focus{border-color:var(--amber);}
+  .modal-actions{
+    display:flex; justify-content:flex-end; gap:10px;
+    margin-top:20px; padding-top:16px;
+    border-top:1px solid var(--line);
+  }
 
-```
-node server.js
-```
-Puis ouvrez : http://localhost:3001
+  /* ---------- TOOLBAR ---------- */
+  .toolbar{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .tool-btn{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:9px 14px;
+    border-radius:8px;
+    font-size:12.5px;
+    font-family:'Inter',sans-serif;
+    font-weight:500;
+    cursor:pointer;
+    transition:all .15s;
+    white-space:nowrap;
+  }
+  .tool-btn svg{flex-shrink:0;opacity:0.85;}
+  .tool-btn:hover{border-color:var(--amber);color:var(--amber);}
+  .tool-btn:hover svg{opacity:1;}
+  .tool-btn.primary{background:var(--amber);border-color:var(--amber);color:#1a1305;font-weight:600;}
+  .tool-btn.primary:hover{background:#f3ad4a;color:#1a1305;}
+  .tool-btn.danger{color:var(--muted);}
+  .tool-btn.danger:hover{border-color:var(--red);color:var(--red);}
+  .tool-btn.danger:disabled{opacity:0.45; cursor:not-allowed; pointer-events:none;}
+  .tool-btn.danger:not(:disabled){border-color:var(--red); color:var(--red); background:rgba(225,97,90,0.08);}
+  .tool-btn.danger:not(:disabled):hover{background:rgba(225,97,90,0.18);}
+  #importFileInput{display:none;}
+  .row-checkbox, #selectAllCheckbox{width:15px;height:15px;cursor:pointer;accent-color:var(--amber);}
 
-Pour changer le port :
-```
-PORT=8080 node server.js
-```
+  /* ---------- TOAST ---------- */
+  #toast{
+    position:fixed;
+    bottom:24px; left:50%;
+    transform:translateX(-50%) translateY(20px);
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-left:3px solid var(--green);
+    color:var(--text);
+    padding:12px 20px;
+    border-radius:8px;
+    font-size:13px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.4);
+    opacity:0;
+    pointer-events:none;
+    transition:all .25s ease;
+    z-index:999;
+    max-width:420px;
+  }
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  #toast.error{border-left-color:var(--red);}
 
-## API
+  /* ---------- AUTH / ADMIN ---------- */
+  #userBadge{
+    display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted);
+    background:var(--panel-2); border:1px solid var(--line); border-radius:20px; padding:5px 12px 5px 6px;
+  }
+  #userBadge .avatar{
+    width:20px; height:20px; border-radius:50%; background:var(--amber); color:#1a1305;
+    display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; flex-shrink:0;
+  }
+  #userBadge .role-tag{
+    font-size:9px; text-transform:uppercase; letter-spacing:.05em; background:rgba(156,135,214,0.18);
+    color:var(--purple); padding:1px 6px; border-radius:8px; margin-left:2px;
+  }
+  #btnLogout{background:transparent; border:1px solid var(--line); color:var(--muted); padding:6px 12px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; font-size:12px; font-family:'Inter',sans-serif; white-space:nowrap;}
+  #btnLogout:hover{border-color:var(--red); color:var(--red);}
+  #usersTableBody td{white-space:nowrap;}
+  .user-role-badge{padding:2px 9px; border-radius:20px; font-size:11px; font-weight:500;}
+  .user-role-badge.admin{background:rgba(156,135,214,0.18); color:var(--purple);}
+  .user-role-badge.user{background:rgba(78,151,217,0.15); color:var(--blue);}
+  .user-status{display:inline-flex; align-items:center; gap:6px; font-size:12px;}
+  .user-status .dot{width:8px; height:8px; border-radius:50%; flex-shrink:0;}
+  .user-status.online{color:var(--green);}
+  .user-status.online .dot{background:var(--green); box-shadow:0 0 6px var(--green);}
+  .user-status.offline{color:var(--muted);}
+  .user-status.offline .dot{background:var(--muted);}
+  .account-toggle{display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none;}
+  .account-toggle .switch{
+    position:relative; width:34px; height:19px; border-radius:20px; background:var(--line);
+    transition:background .15s; flex-shrink:0;
+  }
+  .account-toggle .switch::after{
+    content:""; position:absolute; top:2px; left:2px; width:15px; height:15px; border-radius:50%;
+    background:#fff; transition:transform .15s;
+  }
+  .account-toggle.active .switch{background:var(--green);}
+  .account-toggle.active .switch::after{transform:translateX(15px);}
+  .account-toggle .toggle-label{font-size:11.5px; color:var(--muted);}
+  .account-toggle.active .toggle-label{color:var(--green);}
+  .account-toggle.disabled{opacity:.5; cursor:not-allowed;}
+  .action-badge{padding:2px 9px; border-radius:20px; font-size:11px; font-weight:500; white-space:nowrap;}
+  .action-badge.ajout{background:rgba(76,175,124,0.15); color:var(--green);}
+  .action-badge.modification{background:rgba(226,163,62,0.15); color:var(--amber);}
+  .action-badge.suppression{background:rgba(226,87,78,0.15); color:var(--red);}
+  .action-badge.import{background:rgba(78,151,217,0.15); color:var(--blue);}
+  .action-badge.restauration{background:rgba(156,135,214,0.18); color:var(--purple);}
 
-| Méthode | URL                          | Accès          | Effet                                |
-|---------|------------------------------|----------------|----------------------------------------|
-| GET     | `/api/auth/status`           | public         | Indique si des comptes existent déjà   |
-| POST    | `/api/auth/register-first`   | public (1x)    | Crée le tout premier compte (admin)    |
-| POST    | `/api/auth/login`             | public         | Connexion, renvoie un jeton            |
-| GET     | `/api/auth/me`                | connecté       | Infos du compte connecté               |
-| POST    | `/api/auth/logout`            | connecté       | Invalide le jeton                      |
-| GET     | `/api/users`                  | admin          | Liste des comptes                      |
-| POST    | `/api/users`                  | admin          | Crée un compte                         |
-| DELETE  | `/api/users/:id`               | admin          | Supprime un compte                     |
-| GET     | `/api/dossiers`               | connecté       | Liste des dossiers                     |
-| POST    | `/api/dossiers`               | connecté       | Ajoute un dossier                      |
-| PUT     | `/api/dossiers/:id`            | connecté       | Modifie un dossier                     |
-| DELETE  | `/api/dossiers/:id`            | connecté       | Supprime un dossier                    |
-| POST    | `/api/dossiers/import`         | connecté       | Remplace tous les dossiers (import)    |
-| GET     | `/api/health`                 | public         | Vérifie que le serveur répond          |
+  /* ---------- PRINT ---------- */
+  @media print{
+    /* Force les navigateurs à imprimer les couleurs de fond et d'accent
+       (sans cette propriété, la plupart des navigateurs les ignorent par
+       défaut à l'impression, même si "graphiques d'arrière-plan" est coché). */
+    *{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
 
-Vos données sont dans `data/dossiers.json` et `data/users.json` — de
-simples fichiers texte que vous pouvez sauvegarder.
+    .sidebar{display:none !important;}
+    .app-shell{display:block !important;}
+    .app-content{width:100% !important;}
+    header{position:static !important; backdrop-filter:none !important;}
+    .filters, .toolbar, .refresh-tag, .search-box, #resetFilters, thead th:hover, #btnAddDossier, #btnToggleFilters, #btnDeleteSelected, .modal-overlay, th:last-child, td:last-child, th:first-child, td:first-child{display:none !important;}
+    .table-header-row .search-box{display:none !important;}
+    main{padding:12px 16px;}
+    .panel, .kpi-ticket{break-inside:avoid;}
+    .table-scroll{max-height:none !important; overflow:visible !important;}
+    .alertes-list{max-height:none !important; overflow:visible !important;}
+    .alerte-item{break-inside:avoid;}
+    thead th{position:static !important;}
+    tr.data-row{cursor:default;}
+    .kpi-row{grid-template-columns:repeat(4,1fr) !important;}
+    .indicator-row{grid-template-columns:repeat(3,1fr) !important;}
+    .grid, .grid3{grid-template-columns:1fr 1fr !important;}
+
+    /* Tableau : en-tête répété sur chaque page, pas de ligne coupée en deux */
+    table{page-break-inside:auto;}
+    thead{display:table-header-group;}
+    tbody tr{break-inside:avoid; page-break-inside:avoid;}
+
+    /* Un panneau (graphique, KPI...) ne doit jamais être coupé entre deux pages */
+    .panel, .kpi-ticket, .indicator-ticket, .chart-wrap{break-inside:avoid; page-break-inside:avoid;}
+    .kpi-row, .indicator-row, .grid, .grid3{break-inside:avoid;}
+
+    /* Marges de page raisonnables pour que rien ne soit rogné au bord */
+    @page{margin:12mm;}
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-badge" id="logoBadge">
+      <img src="https://comilog.eramet.com/wp-content/uploads/sites/4/2024/11/Eramet-Comilog-w-300x188.png" alt="Comilog" id="logoImg" onerror="document.getElementById('logoBadge').classList.add('logo-fallback'); this.remove();">
+    </div>
+  </div>
+
+  <p class="sidebar-heading">Navigation</p>
+  <nav class="sidebar-nav">
+    <a href="#dashboardTitle">📊 Tableau de bord</a>
+    <a href="#alertesSection">🔔 Alertes</a>
+    <a href="#chartsSection">📈 Graphiques</a>
+    <a href="#gestionDossiers">📁 Gestion des dossiers</a>
+    <a href="#" id="navHistoryLink" style="display:none;">🕒 Historique</a>
+    <a href="#" id="navAdminLink" style="display:none;">🔑 Administration</a>
+    <a href="#" id="navLogoutLink" style="display:none;">🚪 Déconnexion</a>
+  </nav>
+
+  <p class="sidebar-heading">Légende des statuts <span class="legend-hint">(cliquable)</span></p>
+  <ul class="sidebar-legend" id="legendStatut">
+    <li data-filter-key="statut" data-filter-value="Terminé"><span class="dot" style="background:var(--green)"></span>Terminé</li>
+    <li data-filter-key="statut" data-filter-value="Dans les délais"><span class="dot" style="background:var(--teal)"></span>Dans les délais</li>
+    <li data-filter-key="statut" data-filter-value="En cours / Non renseigné"><span class="dot" style="background:var(--muted)"></span>En cours / non renseigné</li>
+  </ul>
+
+  <p class="sidebar-heading">🚦 Indicateur des travaux <span class="legend-hint">(cliquable)</span></p>
+  <ul class="sidebar-legend" id="legendIndicateur">
+    <li data-filter-key="indicateur" data-filter-value="En attente"><span class="dot" style="background:var(--red)"></span>En attente — pas encore démarré</li>
+    <li data-filter-key="indicateur" data-filter-value="En cours"><span class="dot" style="background:var(--amber)"></span>En cours — travaux engagés</li>
+    <li data-filter-key="indicateur" data-filter-value="Soldé"><span class="dot" style="background:var(--green)"></span>Soldé — clôturé</li>
+  </ul>
+
+  <p class="sidebar-heading">À propos de Comilog</p>
+  <p class="sidebar-text">Compagnie Minière de l'Ogooué, filiale du groupe Eramet — 1ᵉʳ producteur mondial de minerai de manganèse, basée à Moanda, Gabon.</p>
+  <p class="sidebar-text" style="margin-top:8px;"><span class="partner-tag">Partenaire</span> / ★ — prestataire en partenariat avec Comilog (ex. SOGAFRIC), à distinguer d'un prestataire externe classique.</p>
+
+  <div class="sidebar-footer">
+    <p class="sidebar-heading" style="margin-top:0;">Source des données</p>
+    <p class="sidebar-text mono" style="font-size:11px;" id="sidebarSourceFile">Suivi_Travaux_Patrimoine-2026_-01.xlsx</p>
+    <p class="sidebar-text" id="sidebarLastUpdate" style="font-size:11px;"></p>
+  </div>
+</aside>
+
+<div class="app-content">
+
+<header>
+    <div>
+      <p class="brand-eyebrow"><span class="dot"></span>Pôle Patrimoine — Gestion des Travaux</p>
+      <h1>Suivi Travaux 2026</h1>
+      <p class="subtitle">Ordres de travail, coûts et satisfaction — Mai à Juillet 2026</p>
+    </div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;">
+    <div class="refresh-tag">DERNIÈRE MAJ<br><span id="lastUpdate" class="mono" style="color:var(--text);font-size:13px;"></span></div>
+    <div class="toolbar">
+      <button class="tool-btn" id="btnPrint" title="Imprimer la vue filtrée / enregistrer en PDF">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Imprimer / PDF
+      </button>
+      <button class="tool-btn" id="btnExportExcel" title="Exporter les données filtrées en fichier Excel">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="21"/><line x1="16" y1="13" x2="8" y2="21"/></svg>
+        Exporter Excel
+      </button>
+      <button class="tool-btn" id="btnImportExcel" title="Importer un fichier Excel pour remplacer les données">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Importer Excel
+      </button>
+      <input type="file" id="importFileInput" accept=".xlsx,.xls,.xlsm">
+      <button class="tool-btn primary" id="btnExportWord" title="Exporter les données filtrées en document Word">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+        Exporter Word
+      </button>
+      <button class="tool-btn" id="btnOpenAdmin" title="Administration des comptes" style="display:none;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09A1.65 1.65 0 0015 4.6a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Administration
+      </button>
+      <div id="userBadge" style="display:none;">
+        <span class="avatar" id="userAvatar"></span>
+        <span id="userLabel"></span>
+        <button type="button" id="btnLogout" title="Se déconnecter">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Déconnexion
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="filters" id="filtersBar">
+  <div id="filtersMultiselects"></div>
+  <div class="filter-group">
+    <label>Réception depuis</label>
+    <input type="date" id="f-date-debut">
+  </div>
+  <div class="filter-group">
+    <label>Réception jusqu'au</label>
+    <input type="date" id="f-date-fin">
+  </div>
+  <button class="reset-btn" id="resetFilters">Réinitialiser <span id="activeFilterCount"></span></button>
+</div>
+
+<main>
+
+  <div class="dashboard-title" id="dashboardTitle">
+    <h2>📊 Tableau de bord</h2>
+    <p class="panel-sub" style="margin-bottom:0;">Tous les indicateurs clés, recalculés en direct selon les filtres actifs</p>
+  </div>
+
+  <p class="kpi-group-title first">🚦 Indicateurs des travaux</p>
+  <div class="kpi-row indicator-row" id="kpiRowIndicateurs"></div>
+
+  <div class="panel" id="alertesSection" style="margin-bottom:16px;">
+    <div class="table-header-row" style="margin-bottom:10px;">
+      <div>
+        <h3 style="margin-bottom:2px;">🔔 Alertes — Travaux non soldés</h3>
+        <p class="panel-sub" style="margin-bottom:0;">Dossiers encore en attente ou en cours, triés du plus urgent au plus récent</p>
+      </div>
+      <span class="count-tag" id="alertesCount"></span>
+    </div>
+    <div id="alertesList" class="alertes-list"></div>
+  </div>
+
+  <p class="kpi-group-title">Activité</p>
+  <div class="kpi-row" id="kpiRowActivite"></div>
+
+  <p class="kpi-group-title">Coûts</p>
+  <div class="kpi-row" id="kpiRowCouts"></div>
+
+  <p class="kpi-group-title">Performance &amp; qualité</p>
+  <div class="kpi-row" id="kpiRowPerformance"></div>
+
+  <div class="grid" id="chartsSection">
+    <div class="panel">
+      <h3>Coût final par type de travaux</h3>
+      <p class="panel-sub">Répartition des dépenses engagées, tous prestataires confondus</p>
+      <div class="chart-wrap tall"><canvas id="chartCostType"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>Répartition des statuts</h3>
+      <p class="panel-sub">État d'avancement des ordres de travail filtrés</p>
+      <div class="chart-wrap tall"><canvas id="chartStatus"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid3">
+    <div class="panel">
+      <h3>Volume d'OT par jour</h3>
+      <p class="panel-sub">Réceptions d'ordres de travail</p>
+      <div class="chart-wrap"><canvas id="chartTimeline"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>Top 8 localisations</h3>
+      <p class="panel-sub">Nombre d'interventions</p>
+      <div class="chart-wrap"><canvas id="chartLoc"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>Top 8 prestataires</h3>
+      <p class="panel-sub">Par coût final cumulé (FCFA)</p>
+      <div class="chart-wrap"><canvas id="chartPrestataire"></canvas></div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:16px;">
+    <h3>Types de travaux par mois</h3>
+    <p class="panel-sub">Nombre d'ordres de travail par type, réparti par mois — utilisez le filtre « Mois » pour isoler une période</p>
+    <div class="chart-wrap tall"><canvas id="chartTypeMonth"></canvas></div>
+  </div>
+
+  <div class="panel table-panel" style="margin-bottom:16px;">
+    <div class="table-header-row" style="margin-bottom:10px;">
+      <div>
+        <h3 style="margin-bottom:2px;">👷 Suivi par prestataire et par mois</h3>
+        <p class="panel-sub" style="margin-bottom:0;">Nombre d'OT, coût cumulé et durée de traitement, par prestataire — respecte les filtres actifs</p>
+      </div>
+      <span class="count-tag" id="prestMonthCount"></span>
+    </div>
+    <div class="table-scroll" style="max-height:420px;">
+      <table>
+        <thead>
+          <tr>
+            <th style="cursor:default;">Mois</th>
+            <th style="cursor:default;">Prestataire</th>
+            <th style="cursor:default;">Nombre d'OT</th>
+            <th style="cursor:default;">Coût cumulé (FCFA)</th>
+            <th style="cursor:default;">Durée moyenne (jours)</th>
+            <th style="cursor:default;">Durée totale (jours)</th>
+          </tr>
+        </thead>
+        <tbody id="prestMonthTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel table-panel" id="gestionDossiers">
+    <div class="table-header-row">
+      <div>
+        <h3 style="margin-bottom:2px;">📁 Gestion des dossiers</h3>
+        <p class="panel-sub" style="margin-bottom:0;">Ajoutez, consultez et supprimez des ordres de travail — cliquez sur une colonne pour trier</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <button class="tool-btn primary" id="btnAddDossier">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Ajouter un dossier
+        </button>
+        <button class="tool-btn active" id="btnToggleFilters" aria-expanded="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          Filtres <span id="filterBtnCount" class="filter-count-badge"></span>
+        </button>
+        <button class="tool-btn danger" id="btnDeleteSelected" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          Supprimer <span id="deleteSelectedCount" class="filter-count-badge"></span>
+        </button>
+        <span class="count-tag" id="rowCount"></span>
+        <div class="search-box">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="searchBox" placeholder="Rechercher OT, localisation, prestataire…">
+        </div>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table id="dataTable">
+        <thead>
+          <tr>
+            <th style="cursor:default;width:34px;"><input type="checkbox" id="selectAllCheckbox" title="Tout sélectionner"></th>
+            <th data-key="N_OT">N° OT</th>
+            <th data-key="Date_Reception_OT">Réception</th>
+            <th data-key="Type_travaux">Type</th>
+            <th data-key="Localisation">Localisation</th>
+            <th data-key="Superviseur">Superviseur</th>
+            <th data-key="Prestataire">Prestataire</th>
+            <th data-key="Date_Previsionnelle">Prévu</th>
+            <th data-key="Date_Reelle">Réel</th>
+            <th data-key="Cout_Final">Coût final</th>
+            <th data-key="Taux_Satisfaction">Satisfaction</th>
+            <th data-key="Statut_norm">Statut</th>
+            <th style="cursor:default;">Indicateur</th>
+            <th style="cursor:default;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<footer>SUIVI_TRAVAUX_PATRIMOINE · GÉNÉRÉ À PARTIR DE <span id="footerSourceFile">Suivi_Travaux_Patrimoine-2026_-01.xlsx</span> · <span id="totalRecords"></span> ORDRES DE TRAVAIL</footer>
+
+</div>
+</div>
+
+<div id="toast"></div>
+
+<!-- ================= MODAL : AJOUTER UN DOSSIER ================= -->
+<div id="dossierModalOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>Ajouter un dossier</h3>
+      <button type="button" class="modal-close" id="btnCloseModal" aria-label="Fermer">&times;</button>
+    </div>
+    <form id="dossierForm">
+      <div class="modal-grid">
+        <div class="form-field">
+          <label>N° OT <span class="req">*</span></label>
+          <input type="text" id="fld-n-ot" required placeholder="ex. 29740123">
+        </div>
+        <div class="form-field">
+          <label>Date réception OT</label>
+          <input type="date" id="fld-date-reception">
+        </div>
+        <div class="form-field">
+          <label>Type de travaux</label>
+          <input type="text" id="fld-type" list="type-travaux-list" placeholder="ex. Plomberie">
+        </div>
+        <div class="form-field">
+          <label>Localisation</label>
+          <input type="text" id="fld-localisation" list="localisation-list" placeholder="ex. LGM-CAD-M12">
+        </div>
+        <div class="form-field">
+          <label>Superviseur</label>
+          <input type="text" id="fld-superviseur" list="superviseur-list" placeholder="ex. Davy Ngadi">
+        </div>
+        <div class="form-field">
+          <label>Prestataire</label>
+          <input type="text" id="fld-prestataire" list="prestataire-list" placeholder="ex. SOGAFRIC">
+        </div>
+        <div class="form-field">
+          <label>Date diagnostic</label>
+          <input type="date" id="fld-date-diagnostic">
+        </div>
+        <div class="form-field">
+          <label>Date prévisionnelle</label>
+          <input type="date" id="fld-date-prev">
+        </div>
+        <div class="form-field">
+          <label>Date réelle</label>
+          <input type="date" id="fld-date-reelle">
+        </div>
+        <div class="form-field">
+          <label>Coût prévisionnel (FCFA)</label>
+          <input type="number" id="fld-cout-prev" min="0" step="1">
+        </div>
+        <div class="form-field">
+          <label>Coût final (FCFA)</label>
+          <input type="number" id="fld-cout-final" min="0" step="1">
+        </div>
+        <div class="form-field">
+          <label>Taux satisfaction (%)</label>
+          <input type="number" id="fld-satisfaction" min="0" max="100" step="1">
+        </div>
+        <div class="form-field">
+          <label>Statut</label>
+          <input type="text" id="fld-statut" list="statut-list" placeholder="ex. Dans les délais">
+        </div>
+        <div class="form-field span2">
+          <label>Description</label>
+          <input type="text" id="fld-description" placeholder="Description de l'intervention">
+        </div>
+        <div class="form-field span2">
+          <label>Commentaires</label>
+          <input type="text" id="fld-commentaires" placeholder="Commentaires additionnels">
+        </div>
+      </div>
+      <datalist id="type-travaux-list"></datalist>
+      <datalist id="superviseur-list"></datalist>
+      <datalist id="prestataire-list"></datalist>
+      <datalist id="statut-list"></datalist>
+      <datalist id="localisation-list"></datalist>
+      <div class="modal-actions">
+        <button type="button" class="reset-btn" id="btnCancelDossier">Annuler</button>
+        <button type="submit" class="tool-btn primary">Enregistrer le dossier</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= MODAL : DÉTAIL DU DOSSIER (lecture seule) ================= -->
+<div id="detailModalOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="detailModalTitle">Modifier le dossier</h3>
+      <button type="button" class="modal-close" id="btnCloseDetailModal" aria-label="Fermer">&times;</button>
+    </div>
+    <form id="dossierEditForm">
+      <div class="detail-body">
+        <div class="detail-edit-indic">
+          <label for="detailIndicateurSelect">🚦 Indicateur des travaux</label>
+          <select id="detailIndicateurSelect">
+            <option value="">Automatique (selon les dates)</option>
+            <option value="En attente">En attente</option>
+            <option value="En cours">En cours</option>
+            <option value="Soldé">Soldé</option>
+          </select>
+          <p class="detail-edit-hint" id="detailIndicateurHint"></p>
+        </div>
+
+        <div class="modal-grid">
+          <div class="form-field">
+            <label>N° OT</label>
+            <input type="text" id="edit-n-ot" required>
+          </div>
+          <div class="form-field">
+            <label>Date réception OT</label>
+            <input type="date" id="edit-date-reception">
+          </div>
+          <div class="form-field">
+            <label>Type de travaux</label>
+            <input type="text" id="edit-type" list="type-travaux-list">
+          </div>
+          <div class="form-field">
+            <label>Localisation</label>
+            <input type="text" id="edit-localisation" list="localisation-list">
+          </div>
+          <div class="form-field">
+            <label>Superviseur</label>
+            <input type="text" id="edit-superviseur" list="superviseur-list">
+          </div>
+          <div class="form-field">
+            <label>Prestataire</label>
+            <input type="text" id="edit-prestataire" list="prestataire-list">
+          </div>
+          <div class="form-field">
+            <label>Date diagnostic</label>
+            <input type="date" id="edit-date-diagnostic">
+          </div>
+          <div class="form-field">
+            <label>Date prévisionnelle</label>
+            <input type="date" id="edit-date-prev">
+          </div>
+          <div class="form-field">
+            <label>Date réelle</label>
+            <input type="date" id="edit-date-reelle">
+          </div>
+          <div class="form-field">
+            <label>Coût prévisionnel (FCFA)</label>
+            <input type="number" id="edit-cout-prev" min="0" step="1">
+          </div>
+          <div class="form-field">
+            <label>Coût final (FCFA)</label>
+            <input type="number" id="edit-cout-final" min="0" step="1">
+          </div>
+          <div class="form-field">
+            <label>Taux satisfaction (%)</label>
+            <input type="number" id="edit-satisfaction" min="0" max="100" step="1">
+          </div>
+          <div class="form-field">
+            <label>Statut</label>
+            <input type="text" id="edit-statut" list="statut-list">
+          </div>
+          <div class="form-field span2">
+            <label>Description</label>
+            <input type="text" id="edit-description">
+          </div>
+          <div class="form-field span2">
+            <label>Commentaires</label>
+            <input type="text" id="edit-commentaires">
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions" style="padding:0 22px 22px;">
+        <button type="button" class="reset-btn" id="btnCloseDetailModal2">Annuler</button>
+        <button type="submit" class="tool-btn primary">Enregistrer les modifications</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= ÉCRAN DE CONNEXION ================= -->
+<div id="loginOverlay" class="modal-overlay show" style="z-index:500;">
+  <div class="modal-box" style="max-width:400px;">
+    <div class="modal-head">
+      <h3 id="loginTitle">Connexion</h3>
+    </div>
+    <form id="loginForm" style="padding:20px 22px 22px;">
+      <div id="loginBootstrapNotice" class="sidebar-text" style="display:none; background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:16px;">
+        Aucun compte n'existe encore sur ce serveur. Créez le premier compte — il sera automatiquement administrateur.
+      </div>
+      <div class="form-field" style="margin-bottom:14px;">
+        <label>Identifiant</label>
+        <input type="text" id="login-username" required autocomplete="username">
+      </div>
+      <div class="form-field" style="margin-bottom:6px;">
+        <label>Mot de passe</label>
+        <input type="password" id="login-password" required autocomplete="current-password">
+      </div>
+      <p class="sidebar-text" id="loginError" style="color:var(--red); min-height:16px; margin:8px 0 14px;"></p>
+      <div class="modal-actions" style="margin-top:0;">
+        <button type="submit" class="tool-btn primary" id="btnLoginSubmit" style="width:100%; justify-content:center;">Se connecter</button>
+      </div>
+      <p class="sidebar-text" id="loginServerStatus" style="text-align:center; margin-top:14px;"></p>
+    </form>
+  </div>
+</div>
+
+<!-- ================= MODAL : ADMINISTRATION ================= -->
+<div id="adminModalOverlay" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px;">
+    <div class="modal-head">
+      <h3>🔑 Administration — Comptes utilisateurs</h3>
+      <button type="button" class="modal-close" id="btnCloseAdminModal" aria-label="Fermer">&times;</button>
+    </div>
+    <div class="detail-body">
+      <div class="table-header-row" style="margin-bottom:14px;">
+        <p class="sidebar-text" style="margin:0;">Créez un compte pour chaque personne qui doit utiliser l'application.</p>
+        <button type="button" class="tool-btn primary" id="btnShowCreateUser">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Nouveau compte
+        </button>
+      </div>
+
+      <form id="createUserForm" style="display:none; background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-bottom:16px;">
+        <div class="modal-grid">
+          <div class="form-field">
+            <label>Prénom</label>
+            <input type="text" id="newuser-firstname" autocomplete="off">
+          </div>
+          <div class="form-field">
+            <label>Nom</label>
+            <input type="text" id="newuser-lastname" autocomplete="off">
+          </div>
+          <div class="form-field">
+            <label>Identifiant <span class="req">*</span></label>
+            <input type="text" id="newuser-username" required autocomplete="off" placeholder="ex. d.kanda">
+          </div>
+          <div class="form-field">
+            <label>Mot de passe <span class="req">*</span></label>
+            <input type="password" id="newuser-password" required minlength="4" autocomplete="new-password">
+          </div>
+          <div class="form-field">
+            <label>Rôle</label>
+            <select id="newuser-role" style="background:var(--panel); border:1px solid var(--line); color:var(--text); padding:9px 11px; border-radius:7px; font-family:'Inter',sans-serif; font-size:13px;">
+              <option value="user">Utilisateur</option>
+              <option value="admin">Administrateur</option>
+            </select>
+          </div>
+        </div>
+        <p class="sidebar-text" style="margin:8px 0 0;">L'identifiant est proposé automatiquement à partir du prénom et du nom (ex. « Dior Kanda » → <span class="mono">d.kanda</span>) — vous pouvez le modifier librement.</p>
+        <div class="modal-actions">
+          <button type="button" class="reset-btn" id="btnCancelCreateUser">Annuler</button>
+          <button type="submit" class="tool-btn primary">Créer le compte</button>
+        </div>
+      </form>
+
+      <div class="table-scroll" style="max-height:360px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Nom</th>
+              <th>Identifiant</th>
+              <th>Rôle</th>
+              <th style="cursor:default;">Connexion</th>
+              <th style="cursor:default;">Compte</th>
+              <th>Créé le</th>
+              <th>Dernière connexion</th>
+              <th style="cursor:default;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="usersTableBody"></tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
+        <h3 style="margin-bottom:2px;">💾 Sauvegarde des données</h3>
+        <p class="panel-sub" style="margin-bottom:14px;">Téléchargez une copie complète (dossiers, comptes, historique) sur votre ordinateur — à faire régulièrement, notamment avant tout redéploiement.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button type="button" class="tool-btn primary" id="btnDownloadBackup">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Télécharger une sauvegarde
+          </button>
+          <button type="button" class="tool-btn" id="btnShowRestore">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Restaurer une sauvegarde
+          </button>
+          <input type="file" id="restoreFileInput" accept=".json" style="display:none;">
+        </div>
+        <div id="restoreWarning" style="display:none; margin-top:14px; background:rgba(226,87,78,0.1); border:1px solid var(--red); border-radius:8px; padding:12px 14px;">
+          <p class="sidebar-text" style="margin:0 0 10px; color:var(--text);">⚠️ Attention : restaurer une sauvegarde <strong>remplace entièrement</strong> les dossiers, comptes et historique actuels. Tout le monde devra se reconnecter ensuite. Choisissez le fichier de sauvegarde (.json) à restaurer :</p>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button type="button" class="tool-btn danger" id="btnPickRestoreFile" style="border-color:var(--red); color:var(--red);">Choisir le fichier et restaurer</button>
+            <button type="button" class="reset-btn" id="btnCancelRestore">Annuler</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
+        <h3 style="margin-bottom:2px;">🔒 Changer mon mot de passe</h3>
+        <p class="panel-sub" style="margin-bottom:14px;">Valable pour votre propre compte uniquement.</p>
+        <form id="changePasswordForm">
+          <div class="modal-grid">
+            <div class="form-field">
+              <label>Mot de passe actuel</label>
+              <input type="password" id="pwd-current" required autocomplete="current-password">
+            </div>
+            <div class="form-field">
+              <label>Nouveau mot de passe</label>
+              <input type="password" id="pwd-new" required minlength="4" autocomplete="new-password">
+            </div>
+            <div class="form-field">
+              <label>Confirmer le nouveau mot de passe</label>
+              <input type="password" id="pwd-confirm" required minlength="4" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="submit" class="tool-btn primary">Mettre à jour mon mot de passe</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL : HISTORIQUE DES ACTIONS ================= -->
+<div id="historyModalOverlay" class="modal-overlay">
+  <div class="modal-box" style="max-width:680px;">
+    <div class="modal-head">
+      <h3>🕒 Historique des actions</h3>
+      <button type="button" class="modal-close" id="btnCloseHistoryModal" aria-label="Fermer">&times;</button>
+    </div>
+    <div class="detail-body">
+      <p class="sidebar-text" style="margin:0 0 14px;">Qui a ajouté, modifié ou supprimé un dossier, et à quel moment — les 1000 dernières actions sont conservées.</p>
+      <div class="table-scroll" style="max-height:480px;">
+        <table>
+          <thead>
+            <tr>
+              <th style="cursor:default;">Personne</th>
+              <th style="cursor:default;">Action</th>
+              <th style="cursor:default;">Détail</th>
+              <th style="cursor:default;">Date et heure</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let RAW_DATA = [];
+
+let __uidCounter = 0;
+function assignUids(records){
+  records.forEach(d=>{ if(d.__uid == null) d.__uid = ++__uidCounter; });
+}
+
+// ---------- utils ----------
+const fmtFCFA = n => n==null ? '—' : new Intl.NumberFormat('fr-FR').format(Math.round(n)) + ' FCFA';
+const fmtFCFAshort = n => {
+  if(n==null) return '—';
+  if(n>=1000000) return (n/1000000).toFixed(1)+'M';
+  if(n>=1000) return (n/1000).toFixed(0)+'k';
+  return Math.round(n);
+};
+const fmtDate = d => d ? new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short'}) : '—';
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function setLastUpdate(){
+  const label = new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'});
+  document.getElementById('lastUpdate').textContent = label;
+  const sidebarEl = document.getElementById('sidebarLastUpdate');
+  if(sidebarEl) sidebarEl.textContent = `MAJ : ${label}`;
+}
+
+// =========================================================
+// AUTHENTIFICATION
+// =========================================================
+let AUTH_TOKEN = localStorage.getItem('stp_token') || null;
+let CURRENT_USER = null;
+let APP_INITIALIZED = false;
+
+function authHeaders(){
+  return AUTH_TOKEN ? {'Authorization': 'Bearer ' + AUTH_TOKEN} : {};
+}
+
+async function apiFetch(path, options={}, timeoutMs=8000){
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+  try{
+    const headers = {...(options.headers||{}), ...authHeaders()};
+    const res = await fetch(path, {...options, headers, signal: controller.signal});
+    clearTimeout(timer);
+    if(res.status === 401){
+      handleUnauthorized();
+    }
+    return res;
+  }catch(err){
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
+function handleUnauthorized(){
+  if(!AUTH_TOKEN) return;
+  AUTH_TOKEN = null; CURRENT_USER = null;
+  localStorage.removeItem('stp_token');
+  document.getElementById('userBadge').style.display = 'none';
+  document.getElementById('btnOpenAdmin').style.display = 'none';
+  document.getElementById('navAdminLink').style.display = 'none';
+  document.getElementById('navLogoutLink').style.display = 'none';
+  document.getElementById('navHistoryLink').style.display = 'none';
+  document.getElementById('loginOverlay').classList.add('show');
+  document.getElementById('loginError').textContent = 'Session expirée — veuillez vous reconnecter.';
+}
+
+async function checkAuthStatus(){
+  try{
+    const res = await fetch('/api/auth/status');
+    if(!res.ok) return null;
+    return await res.json();
+  }catch(err){ return null; }
+}
+
+async function tryResumeSession(){
+  if(!AUTH_TOKEN) return false;
+  try{
+    const res = await apiFetch('/api/auth/me');
+    if(!res.ok) return false;
+    const data = await res.json();
+    CURRENT_USER = data.user;
+    return true;
+  }catch(err){ return false; }
+}
+
+async function initAuthScreen(){
+  const resumed = await tryResumeSession();
+  if(resumed){ onLoginSuccess(); return; }
+
+  const status = await checkAuthStatus();
+  const bootstrapNotice = document.getElementById('loginBootstrapNotice');
+  const title = document.getElementById('loginTitle');
+  const btn = document.getElementById('btnLoginSubmit');
+  const statusEl = document.getElementById('loginServerStatus');
+
+  if(status === null){
+    statusEl.textContent = "Serveur non détecté — assurez-vous que server.js est bien lancé (node server.js), puis rechargez cette page.";
+    return;
+  }
+  statusEl.textContent = '';
+  if(!status.hasUsers){
+    bootstrapNotice.style.display = 'block';
+    title.textContent = 'Créer le compte administrateur';
+    btn.textContent = 'Créer le compte';
+  }else{
+    bootstrapNotice.style.display = 'none';
+    title.textContent = 'Connexion';
+    btn.textContent = 'Se connecter';
+  }
+}
+
+document.getElementById('loginForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  const isBootstrap = document.getElementById('loginBootstrapNotice').style.display === 'block';
+  const btn = document.getElementById('btnLoginSubmit');
+  btn.disabled = true;
+  try{
+    const endpoint = isBootstrap ? '/api/auth/register-first' : '/api/auth/login';
+    const res = await fetch(endpoint, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({username, password}),
+    });
+    const data = await res.json();
+    if(!res.ok){ errEl.textContent = data.error || 'Échec de connexion.'; btn.disabled = false; return; }
+    AUTH_TOKEN = data.token;
+    CURRENT_USER = data.user;
+    localStorage.setItem('stp_token', AUTH_TOKEN);
+    onLoginSuccess();
+  }catch(err){
+    errEl.textContent = 'Impossible de contacter le serveur. Vérifiez que server.js est bien lancé.';
+  }
+  btn.disabled = false;
+});
+
+function onLoginSuccess(){
+  document.getElementById('loginOverlay').classList.remove('show');
+  document.getElementById('loginForm').reset();
+  document.getElementById('loginError').textContent = '';
+
+  const badge = document.getElementById('userBadge');
+  badge.style.display = 'flex';
+  document.getElementById('userAvatar').textContent = CURRENT_USER.username.slice(0,2).toUpperCase();
+  document.getElementById('userLabel').innerHTML = escapeHtml(CURRENT_USER.username) +
+    (CURRENT_USER.role === 'admin' ? '<span class="role-tag">Admin</span>' : '');
+  document.getElementById('navLogoutLink').style.display = '';
+  document.getElementById('navHistoryLink').style.display = '';
+
+  if(CURRENT_USER.role === 'admin'){
+    document.getElementById('btnOpenAdmin').style.display = '';
+    document.getElementById('navAdminLink').style.display = '';
+  }
+
+  if(!APP_INITIALIZED){
+    APP_INITIALIZED = true;
+    initApp();
+  }else{
+    syncFromServer();
+  }
+}
+
+function doLogout(){
+  apiFetch('/api/auth/logout', {method:'POST'}).catch(()=>{}).finally(()=>{
+    AUTH_TOKEN = null; CURRENT_USER = null;
+    localStorage.removeItem('stp_token');
+    location.reload();
+  });
+}
+document.getElementById('btnLogout').addEventListener('click', doLogout);
+document.getElementById('navLogoutLink').addEventListener('click', (e)=>{ e.preventDefault(); doLogout(); });
+
+async function syncFromServer(){
+  try{
+    const res = await apiFetch('/api/dossiers');
+    if(!res.ok) return;
+    const serverRecords = await res.json();
+    serverRecords.forEach(r=>{ r.__uid = r.id; });
+    RAW_DATA = serverRecords;
+    __uidCounter = Math.max(0, ...serverRecords.map(r=>Number(r.id)||0));
+    refreshFilterOptions();
+    document.getElementById('totalRecords').textContent = RAW_DATA.length;
+    render();
+  }catch(err){
+    showToast('Impossible de récupérer les dossiers depuis le serveur.', true);
+  }
+}
+
+// =========================================================
+// ADMINISTRATION DES COMPTES
+// =========================================================
+const adminModal = document.getElementById('adminModalOverlay');
+let __adminRefreshTimer = null;
+function openAdminModal(){
+  adminModal.classList.add('show');
+  loadUsersList();
+  clearInterval(__adminRefreshTimer);
+  __adminRefreshTimer = setInterval(loadUsersList, 15000);
+}
+function closeAdminModal(){
+  adminModal.classList.remove('show');
+  document.getElementById('createUserForm').style.display = 'none';
+  document.getElementById('createUserForm').reset();
+  clearInterval(__adminRefreshTimer);
+}
+document.getElementById('btnOpenAdmin').addEventListener('click', openAdminModal);
+document.getElementById('navAdminLink').addEventListener('click', (e)=>{ e.preventDefault(); openAdminModal(); });
+document.getElementById('btnCloseAdminModal').addEventListener('click', closeAdminModal);
+adminModal.addEventListener('click', (e)=>{ if(e.target === adminModal) closeAdminModal(); });
+
+// =========================================================
+// HISTORIQUE DES ACTIONS
+// =========================================================
+const historyModal = document.getElementById('historyModalOverlay');
+let __historyRefreshTimer = null;
+function openHistoryModal(){
+  historyModal.classList.add('show');
+  loadHistory();
+  clearInterval(__historyRefreshTimer);
+  __historyRefreshTimer = setInterval(loadHistory, 15000);
+}
+function closeHistoryModal(){
+  historyModal.classList.remove('show');
+  clearInterval(__historyRefreshTimer);
+}
+document.getElementById('navHistoryLink').addEventListener('click', (e)=>{ e.preventDefault(); openHistoryModal(); });
+document.getElementById('btnCloseHistoryModal').addEventListener('click', closeHistoryModal);
+historyModal.addEventListener('click', (e)=>{ if(e.target === historyModal) closeHistoryModal(); });
+
+const ACTION_LABELS = { ajout:'Ajout', modification:'Modification', suppression:'Suppression', import:'Import Excel', restauration:'Restauration sauvegarde' };
+async function loadHistory(){
+  try{
+    const res = await apiFetch('/api/activity');
+    if(!res.ok){ showToast("Impossible de charger l'historique.", true); return; }
+    const entries = await res.json();
+    const fmtDateTime = iso => iso ? new Date(iso).toLocaleString('fr-FR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '—';
+    const tbody = document.getElementById('historyTableBody');
+    if(entries.length === 0){
+      tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Aucune action enregistrée pour le moment.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = entries.map(e=>`
+      <tr>
+        <td class="mono">${escapeHtml(e.username)}</td>
+        <td><span class="action-badge ${e.action}">${ACTION_LABELS[e.action] || e.action}</span></td>
+        <td>${escapeHtml(e.details || '—')}</td>
+        <td class="mono">${fmtDateTime(e.at)}</td>
+      </tr>`).join('');
+  }catch(err){
+    showToast('Serveur injoignable.', true);
+  }
+}
+
+async function loadUsersList(){
+  try{
+    const res = await apiFetch('/api/users');
+    if(!res.ok){ showToast('Impossible de charger la liste des comptes.', true); return; }
+    const users = await res.json();
+    const fmtDateTime = iso => iso ? new Date(iso).toLocaleString('fr-FR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'}) : '—';
+    document.getElementById('usersTableBody').innerHTML = users.map(u=>{
+      const isSelf = CURRENT_USER && u.id === CURRENT_USER.id;
+      const active = u.active !== false;
+      return `
+      <tr>
+        <td>${u.fullName ? escapeHtml(u.fullName) : '<span style="color:var(--muted);">—</span>'}</td>
+        <td class="mono">${escapeHtml(u.username)}${isSelf ? ' (vous)' : ''}</td>
+        <td>
+          <select class="role-select" data-id="${u.id}" ${isSelf ? 'disabled title="Vous ne pouvez pas modifier votre propre rôle"' : ''} style="background:var(--panel); border:1px solid var(--line); color:var(--text); padding:5px 8px; border-radius:6px; font-family:'Inter',sans-serif; font-size:12px;">
+            <option value="user" ${u.role==='user'?'selected':''}>Utilisateur</option>
+            <option value="admin" ${u.role==='admin'?'selected':''}>Administrateur</option>
+          </select>
+        </td>
+        <td><span class="user-status ${u.online ? 'online' : 'offline'}"><span class="dot"></span>${u.online ? 'En ligne' : 'Hors ligne'}</span></td>
+        <td>
+          <span class="account-toggle ${active ? 'active' : ''} ${isSelf ? 'disabled' : ''}" data-id="${u.id}" data-active="${active}" title="${isSelf ? 'Vous ne pouvez pas modifier votre propre compte' : (active ? 'Cliquer pour désactiver' : 'Cliquer pour activer')}">
+            <span class="switch"></span>
+            <span class="toggle-label">${active ? 'Actif' : 'Désactivé'}</span>
+          </span>
+        </td>
+        <td>${fmtDateTime(u.createdAt)}</td>
+        <td>${u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : 'Jamais connecté'}</td>
+        <td style="display:flex; gap:6px;">
+          <button type="button" class="reset-pwd-btn" data-id="${u.id}" data-username="${escapeHtml(u.username)}" title="Réinitialiser le mot de passe" style="background:transparent; border:1px solid var(--line); color:var(--muted); width:28px; height:28px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </button>
+          <button type="button" class="row-delete-btn" data-id="${u.id}" title="Supprimer ce compte">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </button>
+        </td>
+      </tr>`;
+    }).join('');
+    document.querySelectorAll('#usersTableBody .role-select:not(:disabled)').forEach(sel=>{
+      sel.dataset.previousValue = sel.value;
+      sel.addEventListener('change', async ()=>{
+        const id = sel.dataset.id;
+        const newRole = sel.value;
+        const label = newRole === 'admin' ? 'administrateur' : 'utilisateur';
+        if(!confirm(`Changer le rôle de ce compte en « ${label} » ?`)){ sel.value = sel.dataset.previousValue; return; }
+        try{
+          const res2 = await apiFetch(`/api/users/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({role: newRole})});
+          const d = await res2.json().catch(()=>({}));
+          if(res2.ok){ showToast('Rôle mis à jour.'); loadUsersList(); }
+          else{ showToast(d.error || 'Modification impossible.', true); sel.value = sel.dataset.previousValue; }
+        }catch(err){ showToast('Serveur injoignable.', true); sel.value = sel.dataset.previousValue; }
+      });
+    });
+    document.querySelectorAll('#usersTableBody .account-toggle:not(.disabled)').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const id = el.dataset.id;
+        const currentlyActive = el.dataset.active === 'true';
+        const nextActive = !currentlyActive;
+        if(!nextActive && !confirm('Désactiver ce compte ? La personne ne pourra plus se connecter tant que vous ne le réactivez pas.')) return;
+        try{
+          const res2 = await apiFetch(`/api/users/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({active: nextActive})});
+          const d = await res2.json().catch(()=>({}));
+          if(res2.ok){ showToast(nextActive ? 'Compte activé.' : 'Compte désactivé.'); loadUsersList(); }
+          else{ showToast(d.error || 'Modification impossible.', true); }
+        }catch(err){ showToast('Serveur injoignable.', true); }
+      });
+    });
+    document.querySelectorAll('#usersTableBody .reset-pwd-btn').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const newPwd = prompt(`Nouveau mot de passe pour « ${btn.dataset.username} » (4 caractères minimum) :`);
+        if(newPwd === null) return;
+        if(newPwd.length < 4){ showToast('Le mot de passe doit contenir au moins 4 caractères.', true); return; }
+        try{
+          const res2 = await apiFetch(`/api/users/${btn.dataset.id}/password`, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({newPassword: newPwd})});
+          const d = await res2.json().catch(()=>({}));
+          if(res2.ok){ showToast(`Mot de passe de « ${btn.dataset.username} » réinitialisé.`); }
+          else{ showToast(d.error || 'Réinitialisation impossible.', true); }
+        }catch(err){ showToast('Serveur injoignable.', true); }
+      });
+    });
+    document.querySelectorAll('#usersTableBody .row-delete-btn').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        if(!confirm('Supprimer ce compte utilisateur ? Cette action est irréversible.')) return;
+        try{
+          const res2 = await apiFetch(`/api/users/${btn.dataset.id}`, {method:'DELETE'});
+          const d = await res2.json().catch(()=>({}));
+          if(res2.ok){ showToast('Compte supprimé.'); loadUsersList(); }
+          else{ showToast(d.error || 'Suppression impossible.', true); }
+        }catch(err){ showToast('Serveur injoignable.', true); }
+      });
+    });
+  }catch(err){
+    showToast('Serveur injoignable.', true);
+  }
+}
+
+document.getElementById('btnShowCreateUser').addEventListener('click', ()=>{
+  document.getElementById('createUserForm').style.display = 'block';
+  document.getElementById('newuser-firstname').focus();
+});
+document.getElementById('btnCancelCreateUser').addEventListener('click', ()=>{
+  document.getElementById('createUserForm').style.display = 'none';
+  document.getElementById('createUserForm').reset();
+  __usernameManuallyEdited = false;
+});
+
+// Propose automatiquement un identifiant à partir du prénom + nom
+// (ex. « Dior Kanda » → « d.kanda »), modifiable librement ensuite.
+function slugifyIdentifiant(s){
+  return String(s || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // retire les accents
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+let __usernameManuallyEdited = false;
+function suggestUsername(){
+  if(__usernameManuallyEdited) return;
+  const first = slugifyIdentifiant(document.getElementById('newuser-firstname').value);
+  const last = slugifyIdentifiant(document.getElementById('newuser-lastname').value);
+  const usernameField = document.getElementById('newuser-username');
+  if(first && last){ usernameField.value = `${first[0]}.${last}`; }
+  else if(last){ usernameField.value = last; }
+  else if(first){ usernameField.value = first; }
+}
+document.getElementById('newuser-firstname').addEventListener('input', suggestUsername);
+document.getElementById('newuser-lastname').addEventListener('input', suggestUsername);
+document.getElementById('newuser-username').addEventListener('input', ()=>{ __usernameManuallyEdited = true; });
+
+document.getElementById('createUserForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const firstName = document.getElementById('newuser-firstname').value.trim();
+  const lastName = document.getElementById('newuser-lastname').value.trim();
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || null;
+  const username = document.getElementById('newuser-username').value.trim();
+  const password = document.getElementById('newuser-password').value;
+  const role = document.getElementById('newuser-role').value;
+  try{
+    const res = await apiFetch('/api/users', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({username, password, role, fullName}),
+    });
+    const data = await res.json();
+    if(!res.ok){ showToast(data.error || 'Création impossible.', true); return; }
+    showToast(`Compte « ${username} » créé avec succès.`);
+    document.getElementById('createUserForm').reset();
+    document.getElementById('createUserForm').style.display = 'none';
+    __usernameManuallyEdited = false;
+    loadUsersList();
+  }catch(err){
+    showToast('Serveur injoignable.', true);
+  }
+});
+
+// =========================================================
+// SAUVEGARDE / RESTAURATION
+// =========================================================
+document.getElementById('btnDownloadBackup').addEventListener('click', async ()=>{
+  try{
+    const res = await apiFetch('/api/backup');
+    if(!res.ok){ showToast('Impossible de générer la sauvegarde.', true); return; }
+    const backup = await res.json();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    a.href = url; a.download = `sauvegarde-suivi-travaux-${stamp}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Sauvegarde téléchargée (${backup.dossiers.length} dossier(s), ${backup.users.length} compte(s)).`);
+  }catch(err){
+    showToast('Serveur injoignable.', true);
+  }
+});
+
+document.getElementById('btnShowRestore').addEventListener('click', ()=>{
+  document.getElementById('restoreWarning').style.display = 'block';
+});
+document.getElementById('btnCancelRestore').addEventListener('click', ()=>{
+  document.getElementById('restoreWarning').style.display = 'none';
+});
+document.getElementById('btnPickRestoreFile').addEventListener('click', ()=>{
+  document.getElementById('restoreFileInput').click();
+});
+document.getElementById('restoreFileInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  if(!confirm('Cette action va remplacer TOUS les dossiers, comptes et l\'historique actuels par le contenu de ce fichier. Tout le monde devra se reconnecter. Continuer ?')){
+    e.target.value = '';
+    return;
+  }
+  try{
+    const text = await file.text();
+    const backup = JSON.parse(text);
+    const res = await apiFetch('/api/restore', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(backup),
+    });
+    const data = await res.json();
+    if(!res.ok){ showToast(data.error || 'Restauration impossible.', true); return; }
+    showToast(`Sauvegarde restaurée : ${data.dossiers} dossier(s), ${data.users} compte(s). Reconnexion nécessaire.`);
+    document.getElementById('restoreWarning').style.display = 'none';
+    setTimeout(()=>{ handleUnauthorized(); }, 1500);
+  }catch(err){
+    showToast("Fichier invalide ou serveur injoignable.", true);
+  }finally{
+    e.target.value = '';
+  }
+});
+
+document.getElementById('changePasswordForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const currentPassword = document.getElementById('pwd-current').value;
+  const newPassword = document.getElementById('pwd-new').value;
+  const confirmPassword = document.getElementById('pwd-confirm').value;
+  if(newPassword !== confirmPassword){ showToast('Les deux mots de passe ne correspondent pas.', true); return; }
+  if(newPassword.length < 4){ showToast('Le nouveau mot de passe doit contenir au moins 4 caractères.', true); return; }
+  try{
+    const res = await apiFetch('/api/auth/password', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({currentPassword, newPassword}),
+    });
+    const data = await res.json();
+    if(!res.ok){ showToast(data.error || 'Mise à jour impossible.', true); return; }
+    showToast('Votre mot de passe a été mis à jour.');
+    document.getElementById('changePasswordForm').reset();
+  }catch(err){
+    showToast('Serveur injoignable.', true);
+  }
+});
+
+// =========================================================
+// FILTRES MULTI-SÉLECTION
+// =========================================================
+function uniqueVals(key){
+  return [...new Set(RAW_DATA.map(d=>d[key]).filter(v=>v!==null && v!==undefined && v!==''))].sort();
+}
+function uniqueValsBy(getValue){
+  return [...new Set(RAW_DATA.map(getValue).filter(v=>v!==null && v!==undefined && v!==''))].sort();
+}
+function fillDatalist(id, values){
+  const dl = document.getElementById(id);
+  if(dl) dl.innerHTML = values.map(v=>`<option value="${String(v).replace(/"/g,'&quot;')}">`).join('');
+}
+
+const FILTER_DEFS = [
+  {key:'ot', label:'N° OT', getValue:d=>d.N_OT, searchable:true},
+  {key:'mois', label:'Mois', getValue:d=>d.Mois},
+  {key:'type', label:'Type de travaux', getValue:d=>d.Type_travaux},
+  {key:'statut', label:'Statut', getValue:d=>d.Statut_norm},
+  {key:'superviseur', label:'Superviseur', getValue:d=>d.Superviseur},
+  {key:'prestataire', label:'Prestataire', getValue:d=>d.Prestataire, searchable:true},
+  {key:'indicateur', label:'Indicateur', getValue:d=>getIndicateur(d), fixedOptions:['En attente','En cours','Soldé']},
+  {key:'localisation', label:'Localisation', getValue:d=>d.Localisation, searchable:true},
+];
+const filterState = {};
+FILTER_DEFS.forEach(f=>{ filterState[f.key] = new Set(); });
+
+function buildFiltersUI(){
+  const container = document.getElementById('filtersMultiselects');
+  container.innerHTML = FILTER_DEFS.map(f=>`
+    <div class="filter-group msel" data-filter="${f.key}">
+      <label>${f.label}</label>
+      <button type="button" class="msel-btn" id="msel-btn-${f.key}" aria-expanded="false">
+        <span class="msel-btn-label">Tous</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="msel-panel" id="msel-panel-${f.key}">
+        ${f.searchable ? `<div class="msel-search"><input type="text" id="msel-search-${f.key}" placeholder="Rechercher…" autocomplete="off"></div>` : ''}
+        <div class="msel-actions-top">
+          <button type="button" class="msel-mini-btn" data-action="all" data-key="${f.key}">Tout cocher</button>
+          <button type="button" class="msel-mini-btn" data-action="none" data-key="${f.key}">Tout décocher</button>
+        </div>
+        <div class="msel-options" id="msel-options-${f.key}"></div>
+      </div>
+    </div>
+  `).join('');
+}
+function updateFilterButtonLabel(key){
+  const labelEl = document.querySelector(`#msel-btn-${key} .msel-btn-label`);
+  const btn = document.getElementById(`msel-btn-${key}`);
+  if(!labelEl || !btn) return;
+  const set = filterState[key];
+  if(set.size === 0) labelEl.textContent = 'Tous';
+  else if(set.size === 1) labelEl.textContent = [...set][0];
+  else labelEl.textContent = `${set.size} sélectionnés`;
+  btn.classList.toggle('active', set.size > 0);
+}
+function populateFilterOptions(){
+  FILTER_DEFS.forEach(f=>{
+    const values = f.fixedOptions || uniqueValsBy(f.getValue);
+    const validSet = new Set(values);
+    [...filterState[f.key]].forEach(v=>{ if(!validSet.has(v)) filterState[f.key].delete(v); });
+    const optionsEl = document.getElementById(`msel-options-${f.key}`);
+    if(optionsEl){
+      optionsEl.innerHTML = values.length ? values.map(v=>{
+        const checked = filterState[f.key].has(v) ? 'checked' : '';
+        const safe = escapeHtml(v);
+        return `<label class="msel-option" data-value="${safe.toLowerCase()}"><input type="checkbox" ${checked} data-key="${f.key}" value="${safe}"><span>${safe}</span></label>`;
+      }).join('') : '<p class="msel-empty">Aucune valeur disponible</p>';
+    }
+    updateFilterButtonLabel(f.key);
+  });
+}
+function refreshFilterOptions(){
+  populateFilterOptions();
+  fillDatalist('localisation-list', uniqueVals('Localisation'));
+  fillDatalist('type-travaux-list', uniqueVals('Type_travaux'));
+  fillDatalist('superviseur-list', uniqueVals('Superviseur'));
+  fillDatalist('prestataire-list', uniqueVals('Prestataire'));
+  fillDatalist('statut-list', uniqueVals('Statut'));
+}
+
+let sortKey = 'Date_Reception_OT';
+let sortDir = -1;
+let searchTerm = '';
+let selectedUids = new Set();
+
+function getFiltered(){
+  const dateDebut = document.getElementById('f-date-debut').value;
+  const dateFin = document.getElementById('f-date-fin').value;
+  return RAW_DATA.filter(d=>{
+    for(const f of FILTER_DEFS){
+      const set = filterState[f.key];
+      if(set.size === 0) continue;
+      if(!set.has(f.getValue(d))) return false;
+    }
+    if(dateDebut && (!d.Date_Reception_OT || d.Date_Reception_OT < dateDebut)) return false;
+    if(dateFin && (!d.Date_Reception_OT || d.Date_Reception_OT > dateFin)) return false;
+    if(searchTerm){
+      const hay = [d.N_OT,d.Localisation,d.Prestataire,d.Superviseur,d.Type_travaux,d.Description,d.Commentaires].join(' ').toLowerCase();
+      if(!hay.includes(searchTerm.toLowerCase())) return false;
+    }
+    return true;
+  });
+}
+function sortData(data){
+  return [...data].sort((a,b)=>{
+    let va=a[sortKey], vb=b[sortKey];
+    if(va==null) va = sortDir===1?Infinity:-Infinity;
+    if(vb==null) vb = sortDir===1?Infinity:-Infinity;
+    if(typeof va==='string') va=va.toLowerCase();
+    if(typeof vb==='string') vb=vb.toLowerCase();
+    if(va<vb) return -1*sortDir;
+    if(va>vb) return 1*sortDir;
+    return 0;
+  });
+}
+function getSortedFiltered(){ return sortData(getFiltered()); }
+
+function updateActiveFilterCount(){
+  let count = 0;
+  FILTER_DEFS.forEach(f=>{ if(filterState[f.key].size > 0) count++; });
+  if(document.getElementById('f-date-debut').value) count++;
+  if(document.getElementById('f-date-fin').value) count++;
+  document.getElementById('activeFilterCount').textContent = count ? count : '';
+  const btnBadge = document.getElementById('filterBtnCount');
+  if(btnBadge) btnBadge.textContent = count ? count : '';
+  updateLegendActiveState();
+}
+function updateLegendActiveState(){
+  document.querySelectorAll('.sidebar-legend li[data-filter-key]').forEach(li=>{
+    const set = filterState[li.dataset.filterKey];
+    if(!set) return;
+    li.classList.toggle('active', set.has(li.dataset.filterValue));
+  });
+}
+
+// =========================================================
+// INDICATEURS / PARTENAIRES / DIVERS
+// =========================================================
+function computeAutoIndicateur(d){
+  if(d.Date_Reelle || d.Statut_norm === 'Terminé') return 'Soldé';
+  if(d.Date_Diagnostic || d.Date_Previsionnelle || d.Prestataire) return 'En cours';
+  return 'En attente';
+}
+function getIndicateur(d){
+  return d.Indicateur_manuel || computeAutoIndicateur(d);
+}
+const PARTNER_PRESTATAIRES = ['SOGAFRIC'];
+function isPartner(prestataire){
+  return !!prestataire && PARTNER_PRESTATAIRES.includes(prestataire.toUpperCase());
+}
+function median(arr){
+  if(!arr.length) return null;
+  const s = [...arr].sort((a,b)=>a-b);
+  const mid = Math.floor(s.length/2);
+  return s.length % 2 ? s[mid] : (s[mid-1]+s[mid])/2;
+}
+function daysSince(iso){
+  if(!iso) return null;
+  const d = new Date(iso+'T00:00:00');
+  if(isNaN(d)) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
+function moisLabelFromDate(iso){
+  if(!iso) return null;
+  const d = new Date(iso+'T00:00:00');
+  if(isNaN(d)) return null;
+  const label = d.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+function computeStatutNorm(statut, dateReelle){
+  if(statut){
+    const sl = String(statut).toLowerCase();
+    if(sl.startsWith('termin')) return 'Terminé';
+    if(sl.includes('delai') || sl.includes('délai')) return 'Dans les délais';
+    return statut;
+  }
+  if(dateReelle) return 'Terminé';
+  return 'En cours / Non renseigné';
+}
+
+// =========================================================
+// RENDU PRINCIPAL
+// =========================================================
+const cAmber = '#E2A33E', cTeal='#3FB6A8', cGreen='#4CAF7C', cRed='#E2574E', cBlue='#4E97D9', cPurple='#9C87D6', cMuted='#8D9BAA', cLine='#283240';
+const palette = ['#E2A33E','#3FB6A8','#4E97D9','#4CAF7C','#E2574E','#9C87D6','#D6C15E','#7EA8A0','#C97B5D','#8D9BAA'];
+let charts = {};
+function destroyCharts(){ Object.values(charts).forEach(c=>c && c.destroy()); charts = {}; }
+
+// Regroupe les dossiers par mois de réception + prestataire, et calcule
+// le nombre d'OT, le coût cumulé et la durée de traitement (Date_Reelle -
+// Date_Reception_OT, en jours) pour chaque combinaison.
+function renderPrestataireMonthTable(data){
+  const tbody = document.getElementById('prestMonthTableBody');
+  if(!tbody) return;
+  const groups = {};
+  data.forEach(d=>{
+    if(!d.Prestataire || !d.Date_Reception_OT) return;
+    const mois = String(d.Date_Reception_OT).slice(0,7); // "AAAA-MM"
+    const key = mois + '||' + d.Prestataire;
+    if(!groups[key]) groups[key] = { mois, prestataire: d.Prestataire, nbOT:0, cout:0, dureeTotale:0, nbDureeConnue:0 };
+    const g = groups[key];
+    g.nbOT += 1;
+    g.cout += (d.Cout_Final != null ? d.Cout_Final : (d.Cout_Previsionnel != null ? d.Cout_Previsionnel : 0));
+    if(d.Date_Reelle){
+      const jours = Math.round((new Date(d.Date_Reelle) - new Date(d.Date_Reception_OT)) / 86400000);
+      if(!isNaN(jours) && jours >= 0){ g.dureeTotale += jours; g.nbDureeConnue += 1; }
+    }
+  });
+  const rows = Object.values(groups).sort((a,b)=> a.mois === b.mois ? a.prestataire.localeCompare(b.prestataire) : b.mois.localeCompare(a.mois));
+  const fmtMois = m => { const [y,mo]=m.split('-'); return new Date(y, mo-1, 1).toLocaleDateString('fr-FR',{month:'long',year:'numeric'}); };
+  document.getElementById('prestMonthCount').textContent = rows.length ? `${rows.length} ligne(s)` : '';
+  if(rows.length === 0){
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Aucune donnée pour les filtres actifs (prestataire et date de réception requis).</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(g=>`
+    <tr>
+      <td style="text-transform:capitalize;">${fmtMois(g.mois)}</td>
+      <td>${escapeHtml(g.prestataire)}</td>
+      <td>${g.nbOT}</td>
+      <td>${fmtFCFA(g.cout)}</td>
+      <td>${g.nbDureeConnue ? Math.round(g.dureeTotale / g.nbDureeConnue) + ' j' : '—'}</td>
+      <td>${g.nbDureeConnue ? g.dureeTotale + ' j' : '—'}</td>
+    </tr>`).join('');
+}
+
+function render(){
+  const data = getFiltered();
+  updateActiveFilterCount();
+  renderKPIs(data);
+  renderAlertes(data);
+  try{
+    renderCharts(data);
+  }catch(err){
+    console.error('Erreur graphiques Chart.js, bascule sur moteur natif:', err);
+    try{ renderChartsNative(data); }catch(err2){ console.error(err2); }
+  }
+  renderTable(data);
+  try{ renderPrestataireMonthTable(data); }catch(err){ console.error('Erreur tableau prestataire/mois:', err); }
+}
+
+const ALERTES_MAX_SHOWN = 25;
+function renderAlertes(data){
+  const alertes = data
+    .filter(d => getIndicateur(d) !== 'Soldé')
+    .map(d => ({ d, jours: daysSince(d.Date_Reception_OT) }))
+    .sort((a,b) => (b.jours ?? -1) - (a.jours ?? -1));
+
+  document.getElementById('alertesCount').textContent = alertes.length ? `${alertes.length} dossier(s) à traiter` : '';
+  const listEl = document.getElementById('alertesList');
+  if(alertes.length === 0){
+    listEl.innerHTML = '<div class="alertes-empty">✅ Aucun dossier en attente ou en cours — tout est soldé sur cette sélection.</div>';
+    return;
+  }
+  const shown = alertes.slice(0, ALERTES_MAX_SHOWN);
+  listEl.innerHTML = shown.map(({d, jours})=>{
+    const indic = getIndicateur(d);
+    const accent = indic === 'En attente' ? 'var(--red)' : 'var(--amber)';
+    const joursLabel = jours == null ? '—' : jours;
+    return `<div class="alerte-item" style="--accent:${accent}" data-uid="${d.__uid}">
+      <span class="alerte-ot mono">${d.N_OT}</span>
+      <div class="alerte-info">
+        <span class="alerte-title">${d.Type_travaux || 'Type non renseigné'} — ${d.Localisation || 'localisation non renseignée'}</span>
+        <span class="alerte-meta">${indic}${d.Prestataire ? ' · ' + d.Prestataire : ''}${d.Superviseur ? ' · ' + d.Superviseur : ''}</span>
+      </div>
+      <div class="alerte-days" style="--accent:${accent}; color:${accent};">${joursLabel}<small>jour(s)</small></div>
+    </div>`;
+  }).join('');
+  if(alertes.length > ALERTES_MAX_SHOWN){
+    listEl.innerHTML += `<div class="alertes-more">+ ${alertes.length - ALERTES_MAX_SHOWN} autre(s) dossier(s) — affinez les filtres pour les voir tous</div>`;
+  }
+  listEl.querySelectorAll('.alerte-item').forEach(item=>{
+    item.addEventListener('click', ()=> openDetailModal(Number(item.dataset.uid)));
+  });
+}
+
+function renderKPIs(data){
+  const total = data.length;
+  const pct = n => total ? Math.round(n/total*100) : 0;
+
+  const indicCount = {'En attente':0, 'En cours':0, 'Soldé':0};
+  data.forEach(d=>{ indicCount[getIndicateur(d)]++; });
+  const indicateurs = [
+    {label:'En attente', accent:cRed, value: indicCount['En attente'], sub:`${pct(indicCount['En attente'])}% des dossiers filtrés — pas encore démarrés`},
+    {label:'En cours', accent:cAmber, value: indicCount['En cours'], sub:`${pct(indicCount['En cours'])}% des dossiers filtrés — travaux engagés`},
+    {label:'Soldé', accent:cGreen, value: indicCount['Soldé'], sub:`${pct(indicCount['Soldé'])}% des dossiers filtrés — clôturés`},
+  ];
+  document.getElementById('kpiRowIndicateurs').innerHTML = indicateurs.map(k=>`
+    <div class="indicator-ticket" style="--accent:${k.accent}">
+      <span class="indicator-signal"></span>
+      <div class="indicator-body">
+        <div class="indicator-label">${k.label}</div>
+        <div class="indicator-value">${k.value}</div>
+        <div class="indicator-sub">${k.sub}</div>
+      </div>
+    </div>`).join('');
+
+  const sites = new Set(data.map(d=>d.Localisation).filter(Boolean)).size;
+  const prestataires = new Set(data.map(d=>d.Prestataire).filter(Boolean)).size;
+  const superviseurs = new Set(data.map(d=>d.Superviseur).filter(Boolean)).size;
+  const typeCount = {};
+  data.forEach(d=>{ if(d.Type_travaux) typeCount[d.Type_travaux] = (typeCount[d.Type_travaux]||0)+1; });
+  const topTypeEntry = Object.entries(typeCount).sort((a,b)=>b[1]-a[1])[0];
+  const sansPrestataire = data.filter(d=>!d.Prestataire).length;
+  const pctSansPrestataire = total ? Math.round(sansPrestataire/total*100) : 0;
+
+  const costFinal = data.reduce((s,d)=>s+(d.Cout_Final||0),0);
+  const costPrev = data.reduce((s,d)=>s+(d.Cout_Previsionnel||0),0);
+  const costFinalRows = data.filter(d=>d.Cout_Final!=null);
+  const avgCost = costFinalRows.length ? costFinalRows.reduce((s,d)=>s+d.Cout_Final,0)/costFinalRows.length : null;
+  const pairedRows = data.filter(d=>d.Cout_Previsionnel!=null && d.Cout_Final!=null);
+  const pairedPrevSum = pairedRows.reduce((s,d)=>s+d.Cout_Previsionnel,0);
+  const pairedFinalSum = pairedRows.reduce((s,d)=>s+d.Cout_Final,0);
+  const ecartPct = pairedRows.length && pairedPrevSum ? Math.round(((pairedFinalSum-pairedPrevSum)/pairedPrevSum)*100) : null;
+
+  const satisRows = data.filter(d=>d.Taux_Satisfaction!=null);
+  const avgSatis = satisRows.length ? satisRows.reduce((s,d)=>s+d.Taux_Satisfaction,0)/satisRows.length : null;
+  const termine = data.filter(d=>d.Statut_norm==='Terminé').length;
+  const enDelai = data.filter(d=>d.Statut_norm==='Dans les délais').length;
+  const pctAvance = total ? Math.round(((termine+enDelai)/total)*100) : 0;
+  const retardRows = data.filter(d=>d.Retard_jours!=null);
+  const enRetard = retardRows.filter(d=>d.Retard_jours>0).length;
+  const pctRetard = retardRows.length ? Math.round(enRetard/retardRows.length*100) : null;
+  const delaisTraitement = data.filter(d=>d.Date_Reception_OT && d.Date_Reelle)
+    .map(d=>Math.round((new Date(d.Date_Reelle)-new Date(d.Date_Reception_OT))/86400000))
+    .filter(v=>v>=0 && v<=120);
+  const medDelai = median(delaisTraitement);
+
+  const groups = {
+    kpiRowActivite: [
+      {label:'Ordres de travail', value: total, accent:cBlue, sub:`${sites} localisation(s) concernée(s)`},
+      {label:'Prestataires actifs', value: prestataires, accent:cPurple, sub:`${superviseurs} superviseur(s) impliqué(s)`},
+      {label:'Type de travaux dominant', value: topTypeEntry ? topTypeEntry[0] : '—', accent:cTeal, sub: topTypeEntry ? `${topTypeEntry[1]} intervention(s) (${Math.round(topTypeEntry[1]/total*100)}%)` : 'Aucune donnée'},
+      {label:'OT sans prestataire assigné', value: sansPrestataire, accent: pctSansPrestataire>40 ? cRed : cMuted, sub:`${pctSansPrestataire}% des dossiers filtrés`},
+    ],
+    kpiRowCouts: [
+      {label:'Coût final engagé', value: fmtFCFAshort(costFinal)+' FCFA', accent:cAmber, sub: `Sur ${costFinalRows.length} OT chiffré(s)`},
+      {label:'Budget prévisionnel total', value: costPrev ? fmtFCFAshort(costPrev)+' FCFA' : '—', accent:cMuted, sub: `Sur ${data.filter(d=>d.Cout_Previsionnel!=null).length} OT budgété(s)`},
+      {label:'Coût moyen par intervention', value: avgCost!=null ? fmtFCFAshort(avgCost)+' FCFA' : '—', accent:cBlue, sub: 'Moyenne sur les OT chiffrés'},
+      {label:'Écart vs budget prévisionnel', value: ecartPct!=null ? (ecartPct>0?'+':'')+ecartPct+'%' : '—', accent: ecartPct!=null && ecartPct>0 ? cRed : cGreen, sub: pairedRows.length ? `Sur ${pairedRows.length} OT avec prévu ET final` : 'Aucun OT comparable'},
+    ],
+    kpiRowPerformance: [
+      {label:'OT dans les délais / terminés', value: pctAvance+'%', accent:cTeal, sub: `${termine} terminé(s) · ${enDelai} dans les délais`},
+      {label:'OT en retard', value: pctRetard!=null ? pctRetard+'%' : '—', accent: pctRetard!=null && pctRetard>20 ? cRed : cGreen, sub: retardRows.length ? `${enRetard} sur ${retardRows.length} OT avec dates renseignées` : 'Dates insuffisantes'},
+      {label:'Délai médian de traitement', value: medDelai!=null ? medDelai+' j' : '—', accent:cPurple, sub: 'Réception → réalisation'},
+      {label:'Satisfaction moyenne', value: avgSatis!=null ? avgSatis.toFixed(0)+'%' : '—', accent:cGreen, sub: `Sur ${satisRows.length} OT évalué(s)`},
+    ],
+  };
+  Object.entries(groups).forEach(([containerId, kpis])=>{
+    document.getElementById(containerId).innerHTML = kpis.map(k=>`
+      <div class="kpi-ticket" style="--accent:${k.accent}"><div class="stub-label"><span>${k.label}</span></div><div class="kpi-value">${k.value}</div><div class="kpi-sub">${k.sub}</div></div>`).join('');
+  });
+}
+
+if(typeof Chart !== 'undefined'){ Chart.defaults.color = cMuted; Chart.defaults.font.family = "'Inter', sans-serif"; Chart.defaults.font.size = 11; }
+
+function renderCharts(data){
+  if(typeof Chart === 'undefined'){ renderChartsNative(data); return; }
+  destroyCharts();
+
+  const typeMap = {};
+  data.forEach(d=>{ const t = d.Type_travaux || 'Non renseigné'; typeMap[t] = (typeMap[t]||0) + (d.Cout_Final||0); });
+  const typeEntries = Object.entries(typeMap).sort((a,b)=>b[1]-a[1]);
+  charts.costType = new Chart(document.getElementById('chartCostType'), {
+    type:'bar', data:{ labels: typeEntries.map(e=>e[0]), datasets:[{data: typeEntries.map(e=>e[1]), backgroundColor: cAmber, borderRadius:5, maxBarThickness:28}] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>fmtFCFA(ctx.raw)}}}, scales:{x:{grid:{color:cLine}, ticks:{callback:v=>fmtFCFAshort(v)}}, y:{grid:{display:false}}} }
+  });
+
+  const statusMap = {};
+  data.forEach(d=>{ statusMap[d.Statut_norm] = (statusMap[d.Statut_norm]||0)+1; });
+  const statusColors = {'Terminé':cGreen,'Dans les délais':cTeal,'En cours / Non renseigné':cMuted};
+  const statusEntries = Object.entries(statusMap);
+  charts.status = new Chart(document.getElementById('chartStatus'), {
+    type:'doughnut', data:{ labels: statusEntries.map(e=>e[0]), datasets:[{data: statusEntries.map(e=>e[1]), backgroundColor: statusEntries.map(e=>statusColors[e[0]]||cBlue), borderColor:'#1A2027', borderWidth:3}] },
+    options:{ responsive:true, maintainAspectRatio:false, cutout:'68%', plugins:{legend:{position:'bottom', labels:{boxWidth:10,padding:14}}} }
+  });
+
+  const dayMap = {};
+  data.forEach(d=>{ if(d.Date_Reception_OT) dayMap[d.Date_Reception_OT] = (dayMap[d.Date_Reception_OT]||0)+1; });
+  const days = Object.keys(dayMap).sort();
+  charts.timeline = new Chart(document.getElementById('chartTimeline'), {
+    type:'line', data:{ labels: days.map(d=>fmtDate(d)), datasets:[{data: days.map(d=>dayMap[d]), borderColor: cTeal, backgroundColor:'rgba(79,186,176,0.12)', fill:true, tension:0.35, pointRadius:0, borderWidth:2}] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{maxRotation:0, autoSkip:true, maxTicksLimit:8}}, y:{grid:{color:cLine}, beginAtZero:true, ticks:{stepSize:1}}} }
+  });
+
+  const locMap = {};
+  data.forEach(d=>{ if(d.Localisation) locMap[d.Localisation] = (locMap[d.Localisation]||0)+1; });
+  const topLoc = Object.entries(locMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  charts.loc = new Chart(document.getElementById('chartLoc'), {
+    type:'bar', data:{ labels: topLoc.map(e=>e[0]), datasets:[{ data: topLoc.map(e=>e[1]), backgroundColor: cBlue, borderRadius:5, maxBarThickness:20 }] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{grid:{color:cLine}, ticks:{stepSize:1}}, y:{grid:{display:false}, ticks:{font:{size:10}}} } }
+  });
+
+  const prestMap = {};
+  data.forEach(d=>{ if(d.Prestataire) prestMap[d.Prestataire] = (prestMap[d.Prestataire]||0) + (d.Cout_Final||0); });
+  const topPrest = Object.entries(prestMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  charts.prestataire = new Chart(document.getElementById('chartPrestataire'), {
+    type:'bar', data:{ labels: topPrest.map(e=>isPartner(e[0]) ? `${e[0]} ★` : e[0]), datasets:[{ data: topPrest.map(e=>e[1]), backgroundColor: cPurple, borderRadius:5, maxBarThickness:20 }] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>fmtFCFA(ctx.raw)}}}, scales:{ x:{grid:{color:cLine}, ticks:{callback:v=>fmtFCFAshort(v)}}, y:{grid:{display:false}, ticks:{font:{size:10}}} } }
+  });
+
+  const {types: tmTypes, months: tmMonths, matrix: tmMatrix} = buildTypeMonthMatrix(data);
+  charts.typeMonth = new Chart(document.getElementById('chartTypeMonth'), {
+    type:'bar',
+    data:{ labels: tmTypes, datasets: tmMonths.map((m,mi)=>({ label:m, data: tmTypes.map(t=>tmMatrix[t][m]||0), backgroundColor: palette[mi % palette.length], borderRadius:4, maxBarThickness:26 })) },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{boxWidth:10,padding:14}}}, scales:{ x:{stacked:true, grid:{color:cLine}, ticks:{stepSize:1}}, y:{stacked:true, grid:{display:false}} } }
+  });
+}
+
+function buildTypeMonthMatrix(data){
+  const matrix = {}; const monthsSet = new Set();
+  data.forEach(d=>{
+    const t = d.Type_travaux || 'Non renseigné'; const m = d.Mois || 'Non renseigné';
+    monthsSet.add(m); if(!matrix[t]) matrix[t] = {}; matrix[t][m] = (matrix[t][m]||0) + 1;
+  });
+  const types = Object.keys(matrix).sort((a,b)=>{
+    const totalA = Object.values(matrix[a]).reduce((s,v)=>s+v,0);
+    const totalB = Object.values(matrix[b]).reduce((s,v)=>s+v,0);
+    return totalB - totalA;
+  });
+  return {types, months:[...monthsSet].sort(), matrix};
+}
+
+function setupCanvasHiDPI(canvas){
+  const parent = canvas.parentElement;
+  const w = Math.max(parent.clientWidth, 50), h = Math.max(parent.clientHeight, 50);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  canvas.style.width = w+'px'; canvas.style.height = h+'px';
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return {ctx, w, h};
+}
+function roundRectPath(ctx,x,y,w,h,r){
+  const rr = Math.min(r, h/2, Math.max(w,0.01)/2);
+  ctx.beginPath(); ctx.moveTo(x+rr,y); ctx.arcTo(x+w,y,x+w,y+h,rr); ctx.arcTo(x+w,y+h,x,y+h,rr); ctx.arcTo(x,y+h,x,y,rr); ctx.arcTo(x,y,x+w,y,rr); ctx.closePath();
+}
+function drawEmptyMsg(ctx,w,h){ ctx.fillStyle = cMuted; ctx.font = '12px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('Aucune donnée pour ces filtres', w/2, h/2); }
+function truncateLabel(ctx, text, maxWidth){
+  if(ctx.measureText(text).width <= maxWidth) return text;
+  let t = text;
+  while(t.length > 1 && ctx.measureText(t+'…').width > maxWidth){ t = t.slice(0,-1); }
+  return t+'…';
+}
+function drawHBarNative(canvas, entries, color, fmtVal){
+  const {ctx,w,h} = setupCanvasHiDPI(canvas);
+  ctx.clearRect(0,0,w,h);
+  if(!entries.length){ drawEmptyMsg(ctx,w,h); return; }
+  const max = Math.max(...entries.map(e=>e[1]), 1);
+  const n = entries.length, leftPad = 100, rightPad = 14, topPad = 4, barGap = 8;
+  const barH = Math.max(10, Math.min(24, (h-topPad*2)/n - barGap));
+  ctx.font = '11px Inter, sans-serif';
+  entries.forEach((e,i)=>{
+    const y = topPad + i*(barH+barGap);
+    ctx.textAlign='right'; ctx.textBaseline='middle'; ctx.fillStyle = cMuted;
+    ctx.fillText(truncateLabel(ctx, String(e[0]), leftPad-10), leftPad-8, y+barH/2);
+    const barMaxW = w-leftPad-rightPad-55;
+    const barW = Math.max((e[1]/max) * barMaxW, 2);
+    ctx.fillStyle = color; roundRectPath(ctx, leftPad, y, barW, barH, 4); ctx.fill();
+    ctx.fillStyle = '#EDF2F6'; ctx.textAlign='left';
+    ctx.fillText(fmtVal(e[1]), leftPad+barW+6, y+barH/2);
+  });
+}
+function drawDonutNative(canvas, entries, colorFn){
+  const {ctx,w,h} = setupCanvasHiDPI(canvas);
+  ctx.clearRect(0,0,w,h);
+  if(!entries.length){ drawEmptyMsg(ctx,w,h); return; }
+  const total = entries.reduce((s,e)=>s+e[1],0) || 1;
+  const legendH = 34, cx = w/2, cy = (h-legendH)/2 + 6, radius = Math.max(Math.min(cx,cy)-8, 10);
+  let start = -Math.PI/2;
+  entries.forEach((e,i)=>{
+    const angle = (e[1]/total)*Math.PI*2;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,radius,start,start+angle); ctx.closePath();
+    ctx.fillStyle = colorFn(e[0],i); ctx.fill(); start += angle;
+  });
+  ctx.beginPath(); ctx.arc(cx,cy,radius*0.62,0,Math.PI*2); ctx.fillStyle = '#171D25'; ctx.fill();
+  ctx.font='11px Inter, sans-serif'; ctx.textBaseline='middle'; ctx.textAlign='left';
+  let lx = 8, ly = h-16;
+  entries.forEach((e,idx)=>{
+    const txt = `${e[0]} (${e[1]})`; const txtW = ctx.measureText(txt).width;
+    if(lx + 13 + txtW + 20 > w){ lx = 8; ly += 16; }
+    ctx.fillStyle = colorFn(e[0],idx); ctx.fillRect(lx, ly-5, 9, 9);
+    ctx.fillStyle = cMuted; ctx.fillText(txt, lx+13, ly);
+    lx += 13 + txtW + 16;
+  });
+}
+function drawLineNative(canvas, values, color){
+  const {ctx,w,h} = setupCanvasHiDPI(canvas);
+  ctx.clearRect(0,0,w,h);
+  if(!values.length){ drawEmptyMsg(ctx,w,h); return; }
+  const max = Math.max(...values, 1), padL=22,padR=10,padT=10,padB=6;
+  const plotW = w-padL-padR, plotH = h-padT-padB;
+  ctx.strokeStyle = cLine; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(padL,padT); ctx.lineTo(padL,h-padB); ctx.lineTo(w-padR,h-padB); ctx.stroke();
+  ctx.beginPath();
+  values.forEach((v,i)=>{ const x = padL + (i/(Math.max(values.length-1,1)))*plotW; const y = padT + plotH - (v/max)*plotH; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+  ctx.strokeStyle = color; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.stroke();
+  ctx.lineTo(padL+plotW,h-padB); ctx.lineTo(padL,h-padB); ctx.closePath();
+  ctx.globalAlpha = 0.12; ctx.fillStyle = color; ctx.fill(); ctx.globalAlpha = 1;
+}
+function drawStackedHBarNative(canvas, types, months, matrix, colors){
+  const {ctx,w,h} = setupCanvasHiDPI(canvas);
+  ctx.clearRect(0,0,w,h);
+  if(!types.length){ drawEmptyMsg(ctx,w,h); return; }
+  const totals = types.map(t=>months.reduce((s,m)=>s+(matrix[t][m]||0),0));
+  const max = Math.max(...totals, 1);
+  const n = types.length, leftPad = 100, rightPad = 40, topPad = 4, legendH = 22, barGap = 8;
+  const barH = Math.max(10, Math.min(22, (h-topPad*2-legendH)/n - barGap));
+  ctx.font = '11px Inter, sans-serif';
+  types.forEach((t,i)=>{
+    const y = topPad + i*(barH+barGap);
+    ctx.textAlign='right'; ctx.textBaseline='middle'; ctx.fillStyle = cMuted;
+    ctx.fillText(truncateLabel(ctx, t, leftPad-10), leftPad-8, y+barH/2);
+    let x = leftPad; const barMaxW = w-leftPad-rightPad;
+    months.forEach((m,mi)=>{
+      const val = matrix[t][m] || 0; const segW = (val/max) * barMaxW;
+      if(segW > 0.5){ ctx.fillStyle = colors[mi % colors.length]; ctx.fillRect(x, y, segW, barH); x += segW; }
+    });
+    ctx.fillStyle = '#EDF2F6'; ctx.textAlign='left'; ctx.fillText(String(totals[i]), x+6, y+barH/2);
+  });
+  let lx = leftPad, ly = h-8;
+  ctx.font='10.5px Inter, sans-serif'; ctx.textBaseline='middle'; ctx.textAlign='left';
+  months.forEach((m,mi)=>{
+    ctx.fillStyle = colors[mi % colors.length]; ctx.fillRect(lx, ly-5, 9, 9);
+    ctx.fillStyle = cMuted; ctx.fillText(m, lx+13, ly);
+    lx += 13 + ctx.measureText(m).width + 16;
+  });
+}
+function renderChartsNative(data){
+  const typeMap = {};
+  data.forEach(d=>{ const t = d.Type_travaux || 'Non renseigné'; typeMap[t] = (typeMap[t]||0) + (d.Cout_Final||0); });
+  const c1 = document.getElementById('chartCostType'); if(c1) drawHBarNative(c1, Object.entries(typeMap).sort((a,b)=>b[1]-a[1]), cAmber, fmtFCFAshort);
+
+  const statusMap = {};
+  data.forEach(d=>{ statusMap[d.Statut_norm] = (statusMap[d.Statut_norm]||0)+1; });
+  const statusColors = {'Terminé':cGreen,'Dans les délais':cTeal,'En cours / Non renseigné':cMuted};
+  const c2 = document.getElementById('chartStatus'); if(c2) drawDonutNative(c2, Object.entries(statusMap), (label)=>statusColors[label]||cBlue);
+
+  const dayMap = {};
+  data.forEach(d=>{ if(d.Date_Reception_OT) dayMap[d.Date_Reception_OT] = (dayMap[d.Date_Reception_OT]||0)+1; });
+  const days = Object.keys(dayMap).sort();
+  const c3 = document.getElementById('chartTimeline'); if(c3) drawLineNative(c3, days.map(d=>dayMap[d]), cTeal);
+
+  const locMap = {};
+  data.forEach(d=>{ if(d.Localisation) locMap[d.Localisation] = (locMap[d.Localisation]||0)+1; });
+  const c4 = document.getElementById('chartLoc'); if(c4) drawHBarNative(c4, Object.entries(locMap).sort((a,b)=>b[1]-a[1]).slice(0,8), cBlue, v=>String(v));
+
+  const prestMap = {};
+  data.forEach(d=>{ if(d.Prestataire) prestMap[d.Prestataire] = (prestMap[d.Prestataire]||0) + (d.Cout_Final||0); });
+  const topPrest = Object.entries(prestMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const c5 = document.getElementById('chartPrestataire'); if(c5) drawHBarNative(c5, topPrest.map(e=>[isPartner(e[0]) ? `${e[0]} ★` : e[0], e[1]]), cPurple, fmtFCFAshort);
+
+  const {types: tmTypes, months: tmMonths, matrix: tmMatrix} = buildTypeMonthMatrix(data);
+  const c6 = document.getElementById('chartTypeMonth'); if(c6) drawStackedHBarNative(c6, tmTypes, tmMonths, tmMatrix, palette);
+}
+
+// =========================================================
+// TABLEAU / SÉLECTION / ACTIONS
+// =========================================================
+function renderTable(data){
+  const sorted = sortData(data);
+  document.getElementById('rowCount').textContent = `${sorted.length} ligne${sorted.length>1?'s':''}`;
+
+  const allUids = new Set(RAW_DATA.map(d=>d.__uid));
+  selectedUids.forEach(uid=>{ if(!allUids.has(uid)) selectedUids.delete(uid); });
+
+  if(sorted.length === 0){
+    document.getElementById('tableBody').innerHTML = `<tr><td colspan="14" class="empty-state">Aucun ordre de travail ne correspond aux filtres sélectionnés.</td></tr>`;
+    updateDeleteSelectedState([]);
+    return;
+  }
+
+  document.getElementById('tableBody').innerHTML = sorted.map(d=>{
+    const statutClass = d.Statut_norm === 'Terminé' ? 'ok' : d.Statut_norm === 'Dans les délais' ? 'ok' : 'wait';
+    const indic = getIndicateur(d);
+    const indicClass = indic === 'Soldé' ? 'indic-solde' : indic === 'En cours' ? 'indic-encours' : 'indic-attente';
+    const checked = selectedUids.has(d.__uid) ? 'checked' : '';
+    return `<tr class="data-row" data-uid="${d.__uid}" title="Cliquer pour voir le détail complet">
+      <td class="row-select" onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-uid="${d.__uid}" ${checked}></td>
+      <td class="ot-cell mono">${d.N_OT}</td>
+      <td>${fmtDate(d.Date_Reception_OT)}</td>
+      <td>${d.Type_travaux ? `<span class="badge type">${d.Type_travaux}</span>` : '—'}</td>
+      <td>${d.Localisation || '—'}</td>
+      <td>${d.Superviseur || '—'}</td>
+      <td>${d.Prestataire ? d.Prestataire + (isPartner(d.Prestataire) ? '<span class="partner-tag" title="Prestataire en partenariat avec Comilog">Partenaire</span>' : '') : '—'}</td>
+      <td>${fmtDate(d.Date_Previsionnelle)}</td>
+      <td>${fmtDate(d.Date_Reelle)}</td>
+      <td class="mono">${d.Cout_Final ? fmtFCFA(d.Cout_Final) : '—'}</td>
+      <td>${d.Taux_Satisfaction!=null ? d.Taux_Satisfaction+'%' : '—'}</td>
+      <td><span class="badge ${statutClass}">${d.Statut_norm}</span></td>
+      <td><span class="badge indic ${indicClass}"><span class="indic-dot"></span>${indic}${d.Indicateur_manuel ? '<span title="Modifié manuellement">✎</span>' : ''}</span></td>
+      <td class="row-actions">
+        <button type="button" class="row-view-btn" data-uid="${d.__uid}" title="Voir le détail complet">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+        <button type="button" class="row-delete-btn" data-uid="${d.__uid}" title="Supprimer ce dossier">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.querySelectorAll('.row-delete-btn').forEach(btn=>{
+    btn.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      const uid = Number(btn.dataset.uid);
+      const rec = RAW_DATA.find(d=>d.__uid === uid);
+      if(!rec) return;
+      if(!confirm(`Supprimer le dossier N° OT ${rec.N_OT} (${rec.Type_travaux || 'type non renseigné'} — ${rec.Localisation || 'localisation non renseignée'}) ?`)) return;
+      RAW_DATA = RAW_DATA.filter(d=>d.__uid !== uid);
+      selectedUids.delete(uid);
+      refreshFilterOptions();
+      document.getElementById('totalRecords').textContent = RAW_DATA.length;
+      render();
+      const synced = await apiDeleteDossier(uid);
+      showToast(synced ? 'Dossier supprimé (serveur synchronisé).' : 'Dossier supprimé localement (non synchronisé).');
+    });
+  });
+  document.querySelectorAll('.row-view-btn').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{ e.stopPropagation(); openDetailModal(Number(btn.dataset.uid)); });
+  });
+  document.querySelectorAll('tr.data-row').forEach(tr=>{
+    tr.addEventListener('click', ()=>openDetailModal(Number(tr.dataset.uid)));
+  });
+  document.querySelectorAll('.row-checkbox').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const uid = Number(cb.dataset.uid);
+      if(cb.checked) selectedUids.add(uid); else selectedUids.delete(uid);
+      updateDeleteSelectedState(sorted.map(d=>d.__uid));
+    });
+  });
+  updateDeleteSelectedState(sorted.map(d=>d.__uid));
+}
+
+function updateDeleteSelectedState(visibleUids){
+  const btn = document.getElementById('btnDeleteSelected');
+  const countEl = document.getElementById('deleteSelectedCount');
+  const selectAll = document.getElementById('selectAllCheckbox');
+  const count = selectedUids.size;
+  btn.disabled = count === 0;
+  countEl.textContent = count ? count : '';
+  if(selectAll){
+    const visibleSelectedCount = visibleUids.filter(uid=>selectedUids.has(uid)).length;
+    selectAll.checked = visibleUids.length > 0 && visibleSelectedCount === visibleUids.length;
+    selectAll.indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < visibleUids.length;
+  }
+}
+
+// =========================================================
+// API — DOSSIERS
+// =========================================================
+async function apiAddDossier(record){
+  try{
+    const res = await apiFetch('/api/dossiers', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(record)});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    return await res.json();
+  }catch(err){ return null; }
+}
+async function apiUpdateDossier(id, updates){
+  try{
+    const res = await apiFetch(`/api/dossiers/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(updates)});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    return await res.json();
+  }catch(err){ return null; }
+}
+async function apiDeleteDossier(uid){
+  try{
+    const res = await apiFetch(`/api/dossiers/${uid}`, {method:'DELETE'});
+    return res.ok;
+  }catch(err){ return false; }
+}
+async function apiImportDossiers(records){
+  try{
+    const res = await apiFetch('/api/dossiers/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(records)});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const payload = await res.json();
+    return payload.dossiers || null;
+  }catch(err){ return null; }
+}
+
+// =========================================================
+// TOAST / IMPRESSION
+// =========================================================
+let toastTimer = null;
+function showToast(message, isError=false){
+  const el = document.getElementById('toast');
+  el.textContent = message; el.classList.toggle('error', isError); el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=> el.classList.remove('show'), 4200);
+}
+function redrawChartsForCurrentLayout(){
+  const data = getFiltered();
+  try{ if(typeof Chart !== 'undefined') renderCharts(data); else renderChartsNative(data); }
+  catch(err){ console.error('Erreur redimensionnement graphiques:', err); }
+}
+window.addEventListener('beforeprint', redrawChartsForCurrentLayout);
+window.addEventListener('afterprint', redrawChartsForCurrentLayout);
+let __resizeTimer = null;
+window.addEventListener('resize', ()=>{
+  clearTimeout(__resizeTimer);
+  __resizeTimer = setTimeout(()=>{ if(typeof Chart === 'undefined'){ try{ renderChartsNative(getFiltered()); }catch(err){ console.error(err); } } }, 200);
+});
+
+// =========================================================
+// EXPORT EXCEL / WORD
+// =========================================================
+async function handleExportExcel(){
+  await window.__libsReady;
+  if(typeof XLSX === 'undefined'){ showToast("Export Excel indisponible : bibliothèque non chargée.", true); return; }
+  const rows = getSortedFiltered().map(d=>({
+    'N° OT': d.N_OT, 'Date Réception OT': d.Date_Reception_OT || '', 'Description': d.Description || '',
+    'Type de travaux': d.Type_travaux || '', 'Localisation': d.Localisation || '', 'Superviseur': d.Superviseur || '',
+    'Prestataire': d.Prestataire || '', 'Date Diagnostic': d.Date_Diagnostic || '', 'Date Prévisionnelle': d.Date_Previsionnelle || '',
+    'Date Réelle': d.Date_Reelle || '', 'Coût Prévisionnel': d.Cout_Previsionnel, 'Coût Final': d.Cout_Final,
+    'Taux Satisfaction': d.Taux_Satisfaction, 'Statut': d.Statut_norm || '', 'Commentaires': d.Commentaires || '',
+  }));
+  if(rows.length===0){ showToast('Aucune ligne à exporter avec les filtres actuels.', true); return; }
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Suivi Travaux');
+  const stamp = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `Suivi_Travaux_Export_${stamp}.xlsx`);
+  showToast(`${rows.length} ligne(s) exportée(s) vers Excel.`);
+}
+document.getElementById('btnExportExcel').addEventListener('click', handleExportExcel);
+document.getElementById('btnPrint').addEventListener('click', ()=>window.print());
+
+document.getElementById('btnExportWord').addEventListener('click', ()=>{
+  const data = getSortedFiltered();
+  if(data.length===0){ showToast('Aucune ligne à exporter avec les filtres actuels.', true); return; }
+  const total = data.length;
+  const costFinal = data.reduce((s,d)=>s+(d.Cout_Final||0),0);
+  const satisRows = data.filter(d=>d.Taux_Satisfaction!=null);
+  const avgSatis = satisRows.length ? (satisRows.reduce((s,d)=>s+d.Taux_Satisfaction,0)/satisRows.length).toFixed(0) : '—';
+  const rowsHtml = data.map(d=>`<tr><td>${d.N_OT||''}</td><td>${fmtDate(d.Date_Reception_OT)}</td><td>${d.Type_travaux||''}</td><td>${d.Localisation||''}</td><td>${d.Superviseur||''}</td><td>${d.Prestataire||''}</td><td>${fmtDate(d.Date_Previsionnelle)}</td><td>${fmtDate(d.Date_Reelle)}</td><td>${d.Cout_Final?fmtFCFA(d.Cout_Final):''}</td><td>${d.Taux_Satisfaction!=null?d.Taux_Satisfaction+'%':''}</td><td>${d.Statut_norm||''}</td></tr>`).join('');
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+  <head><meta charset="utf-8"><title>Suivi des Travaux — Patrimoine 2026</title>
+  <style>body{font-family:Calibri,Arial,sans-serif;color:#111;} h1{font-size:20px;margin-bottom:2px;} p.sub{color:#555;font-size:12px;margin-top:0;} table{border-collapse:collapse;width:100%;font-size:11px;margin-top:16px;} th,td{border:1px solid #999;padding:5px 7px;text-align:left;} th{background:#E2A33E;color:#1a1305;} .kpis{margin-top:14px;} .kpis td{border:none;padding:4px 14px 4px 0;font-size:12px;} .kpis b{font-size:15px;}</style></head>
+  <body><h1>Suivi des Travaux — Patrimoine 2026</h1>
+  <p class="sub">Export généré le ${new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'})} — ${total} ordre(s) de travail (vue filtrée)</p>
+  <table class="kpis"><tr><td>Ordres de travail<br><b>${total}</b></td><td>Coût final engagé<br><b>${fmtFCFA(costFinal)}</b></td><td>Satisfaction moyenne<br><b>${avgSatis}${avgSatis!=='—'?'%':''}</b></td></tr></table>
+  <table><thead><tr><th>N° OT</th><th>Réception</th><th>Type</th><th>Localisation</th><th>Superviseur</th><th>Prestataire</th><th>Prévu</th><th>Réel</th><th>Coût final</th><th>Satisfaction</th><th>Statut</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+  </body></html>`;
+  const blob = new Blob(['\ufeff', html], {type:'application/msword'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `Suivi_Travaux_Export_${new Date().toISOString().slice(0,10)}.doc`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`${total} ligne(s) exportée(s) vers Word.`);
+});
+
+// =========================================================
+// MODALES AJOUTER / MODIFIER UN DOSSIER
+// =========================================================
+const dossierModal = document.getElementById('dossierModalOverlay');
+const dossierForm = document.getElementById('dossierForm');
+function openDossierModal(){ dossierForm.reset(); dossierModal.classList.add('show'); document.getElementById('fld-n-ot').focus(); }
+function closeDossierModal(){ dossierModal.classList.remove('show'); }
+document.getElementById('btnAddDossier').addEventListener('click', openDossierModal);
+document.getElementById('btnCloseModal').addEventListener('click', closeDossierModal);
+document.getElementById('btnCancelDossier').addEventListener('click', closeDossierModal);
+dossierModal.addEventListener('click', (e)=>{ if(e.target === dossierModal) closeDossierModal(); });
+
+const detailModal = document.getElementById('detailModalOverlay');
+const dossierEditForm = document.getElementById('dossierEditForm');
+function openDetailModal(uid){
+  const d = RAW_DATA.find(r=>r.__uid === uid);
+  if(!d) return;
+  document.getElementById('detailModalTitle').textContent = `Modifier le dossier N° OT ${d.N_OT}`;
+  const select = document.getElementById('detailIndicateurSelect');
+  select.value = d.Indicateur_manuel || '';
+  document.getElementById('detailIndicateurHint').textContent = d.Indicateur_manuel
+    ? `Valeur forcée manuellement (calcul automatique : « ${computeAutoIndicateur(d)} »).`
+    : `Valeur calculée automatiquement à partir des dates : « ${getIndicateur(d)} ».`;
+  document.getElementById('edit-n-ot').value = d.N_OT || '';
+  document.getElementById('edit-date-reception').value = d.Date_Reception_OT || '';
+  document.getElementById('edit-type').value = d.Type_travaux || '';
+  document.getElementById('edit-localisation').value = d.Localisation || '';
+  document.getElementById('edit-superviseur').value = d.Superviseur || '';
+  document.getElementById('edit-prestataire').value = d.Prestataire || '';
+  document.getElementById('edit-date-diagnostic').value = d.Date_Diagnostic || '';
+  document.getElementById('edit-date-prev').value = d.Date_Previsionnelle || '';
+  document.getElementById('edit-date-reelle').value = d.Date_Reelle || '';
+  document.getElementById('edit-cout-prev').value = d.Cout_Previsionnel!=null ? d.Cout_Previsionnel : '';
+  document.getElementById('edit-cout-final').value = d.Cout_Final!=null ? d.Cout_Final : '';
+  document.getElementById('edit-satisfaction').value = d.Taux_Satisfaction!=null ? d.Taux_Satisfaction : '';
+  document.getElementById('edit-statut').value = d.Statut || '';
+  document.getElementById('edit-description').value = d.Description || '';
+  document.getElementById('edit-commentaires').value = d.Commentaires || '';
+  dossierEditForm.dataset.uid = uid;
+  detailModal.classList.add('show');
+}
+function closeDetailModal(){ detailModal.classList.remove('show'); }
+document.getElementById('btnCloseDetailModal').addEventListener('click', closeDetailModal);
+document.getElementById('btnCloseDetailModal2').addEventListener('click', closeDetailModal);
+detailModal.addEventListener('click', (e)=>{ if(e.target === detailModal) closeDetailModal(); });
+document.addEventListener('keydown', (e)=>{
+  if(e.key !== 'Escape') return;
+  if(dossierModal.classList.contains('show')) closeDossierModal();
+  if(detailModal.classList.contains('show')) closeDetailModal();
+  if(adminModal.classList.contains('show')) closeAdminModal();
+  if(historyModal.classList.contains('show')) closeHistoryModal();
+});
+
+dossierEditForm.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const uid = Number(dossierEditForm.dataset.uid);
+  const d = RAW_DATA.find(r=>r.__uid === uid);
+  if(!d) return;
+  const nOt = document.getElementById('edit-n-ot').value.trim();
+  if(!nOt){ showToast('Le N° OT est obligatoire.', true); return; }
+  const num = v => v==='' ? null : Number(v);
+  const txt = v => v.trim() === '' ? null : v.trim();
+  d.N_OT = nOt;
+  d.Date_Reception_OT = document.getElementById('edit-date-reception').value || null;
+  d.Type_travaux = txt(document.getElementById('edit-type').value);
+  d.Localisation = txt(document.getElementById('edit-localisation').value);
+  d.Superviseur = txt(document.getElementById('edit-superviseur').value);
+  d.Prestataire = txt(document.getElementById('edit-prestataire').value);
+  d.Date_Diagnostic = document.getElementById('edit-date-diagnostic').value || null;
+  d.Date_Previsionnelle = document.getElementById('edit-date-prev').value || null;
+  d.Date_Reelle = document.getElementById('edit-date-reelle').value || null;
+  d.Cout_Previsionnel = num(document.getElementById('edit-cout-prev').value);
+  d.Cout_Final = num(document.getElementById('edit-cout-final').value);
+  d.Taux_Satisfaction = num(document.getElementById('edit-satisfaction').value);
+  d.Statut = txt(document.getElementById('edit-statut').value);
+  d.Description = txt(document.getElementById('edit-description').value);
+  d.Commentaires = txt(document.getElementById('edit-commentaires').value);
+  d.Mois = moisLabelFromDate(d.Date_Reception_OT) || d.Mois;
+  d.Statut_norm = computeStatutNorm(d.Statut, d.Date_Reelle);
+  d.Retard_jours = (d.Date_Reelle && d.Date_Previsionnelle) ? Math.round((new Date(d.Date_Reelle) - new Date(d.Date_Previsionnelle)) / 86400000) : null;
+  d.Indicateur_manuel = document.getElementById('detailIndicateurSelect').value || null;
+
+  const submitBtn = dossierEditForm.querySelector('button[type="submit"]');
+  if(submitBtn) submitBtn.disabled = true;
+  const serverRecord = await apiUpdateDossier(d.__uid, d);
+  if(submitBtn) submitBtn.disabled = false;
+  refreshFilterOptions(); render(); closeDetailModal();
+  showToast(serverRecord ? `Dossier N° OT ${nOt} modifié et synchronisé.` : `Dossier N° OT ${nOt} modifié (non synchronisé).`);
+});
+
+dossierForm.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const nOt = document.getElementById('fld-n-ot').value.trim();
+  if(!nOt){ showToast('Le N° OT est obligatoire.', true); return; }
+  const num = v => v==='' ? null : Number(v);
+  const txt = v => v.trim() === '' ? null : v.trim();
+  const dateReception = document.getElementById('fld-date-reception').value || null;
+  const dateReelle = document.getElementById('fld-date-reelle').value || null;
+  const datePrev = document.getElementById('fld-date-prev').value || null;
+  const statut = txt(document.getElementById('fld-statut').value);
+  let retard = null;
+  if(dateReelle && datePrev) retard = Math.round((new Date(dateReelle) - new Date(datePrev)) / 86400000);
+  const record = {
+    N_OT: nOt, Date_Reception_OT: dateReception, Description: txt(document.getElementById('fld-description').value),
+    Type_travaux: txt(document.getElementById('fld-type').value), Localisation: txt(document.getElementById('fld-localisation').value),
+    Superviseur: txt(document.getElementById('fld-superviseur').value), Prestataire: txt(document.getElementById('fld-prestataire').value),
+    Date_Diagnostic: document.getElementById('fld-date-diagnostic').value || null, Date_Previsionnelle: datePrev, Date_Reelle: dateReelle,
+    Cout_Previsionnel: num(document.getElementById('fld-cout-prev').value), Cout_Final: num(document.getElementById('fld-cout-final').value),
+    Taux_Satisfaction: num(document.getElementById('fld-satisfaction').value), Statut: statut,
+    Commentaires: txt(document.getElementById('fld-commentaires').value), Mois: moisLabelFromDate(dateReception) || null,
+    Statut_norm: computeStatutNorm(statut, dateReelle), Retard_jours: retard,
+  };
+  const submitBtn = dossierForm.querySelector('button[type="submit"]');
+  if(submitBtn) submitBtn.disabled = true;
+  const serverRecord = await apiAddDossier(record);
+  if(submitBtn) submitBtn.disabled = false;
+  if(serverRecord){ serverRecord.__uid = serverRecord.id; RAW_DATA.unshift(serverRecord); }
+  else{ assignUids([record]); RAW_DATA.unshift(record); }
+  refreshFilterOptions();
+  document.getElementById('totalRecords').textContent = RAW_DATA.length;
+  sortKey = 'Date_Reception_OT'; sortDir = -1;
+  render(); closeDossierModal();
+  showToast(serverRecord ? `Dossier N° OT ${nOt} ajouté et enregistré sur le serveur.` : `Dossier N° OT ${nOt} ajouté (non synchronisé).`);
+  document.getElementById('gestionDossiers').scrollIntoView({behavior:'smooth', block:'start'});
+});
+
+// =========================================================
+// IMPORT EXCEL
+// =========================================================
+document.getElementById('btnImportExcel').addEventListener('click', ()=>{ document.getElementById('importFileInput').click(); });
+function normHeader(s){ return String(s==null?'':s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,''); }
+const HEADER_MAP = {
+  'not':'N_OT','nrot':'N_OT','nrdeot':'N_OT','nrdot':'N_OT','numot':'N_OT','datereceptionot':'Date_Reception_OT','description':'Description',
+  'typedetravaux':'Type_travaux','type':'Type_travaux','localisation':'Localisation','superviseur':'Superviseur','prestataire':'Prestataire',
+  'datediagnostic':'Date_Diagnostic','dateprevisionnelle':'Date_Previsionnelle','datereelle':'Date_Reelle','coutprevisionnel':'Cout_Previsionnel',
+  'coutfinal':'Cout_Final','tauxsatisfaction':'Taux_Satisfaction','statut':'Statut','commentaires':'Commentaires','commentaire':'Commentaires',
+};
+function excelDateToISO(v){
+  if(v instanceof Date && !isNaN(v)){ const y=v.getFullYear(), m=String(v.getMonth()+1).padStart(2,'0'), d=String(v.getDate()).padStart(2,'0'); return `${y}-${m}-${d}`; }
+  return null;
+}
+function parseWorkbook(workbook){
+  const records = [];
+  workbook.SheetNames.forEach(sheetName=>{
+    const ws = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
+    let headerIdx = -1, colMap = {};
+    for(let i=0;i<Math.min(rows.length,10);i++){
+      const row = rows[i] || []; let map = {}, matches = 0;
+      row.forEach((cell,idx)=>{ const f = HEADER_MAP[normHeader(cell)]; if(f && map[f]===undefined){ map[f]=idx; matches++; } });
+      if(matches >= 5){ headerIdx = i; colMap = map; break; }
+    }
+    if(headerIdx === -1) return;
+    for(let i=headerIdx+1;i<rows.length;i++){
+      const row = rows[i];
+      if(!row || row.every(c=>c===null || c==='')) continue;
+      const get = f => colMap[f]!==undefined ? row[colMap[f]] : null;
+      const otRaw = get('N_OT');
+      if(otRaw===null || otRaw==='') continue;
+      const nOt = String(typeof otRaw==='number' ? Math.round(otRaw) : otRaw).trim();
+      if(!/^[0-9]+$/.test(nOt)) continue;
+      const dateReception = excelDateToISO(get('Date_Reception_OT'));
+      const dateDiag = excelDateToISO(get('Date_Diagnostic'));
+      const datePrev = excelDateToISO(get('Date_Previsionnelle'));
+      const dateReelle = excelDateToISO(get('Date_Reelle'));
+      const coutPrev = typeof get('Cout_Previsionnel')==='number' ? get('Cout_Previsionnel') : null;
+      const coutFinal = typeof get('Cout_Final')==='number' ? get('Cout_Final') : null;
+      const taux = typeof get('Taux_Satisfaction')==='number' ? get('Taux_Satisfaction') : null;
+      const statut = get('Statut') ? String(get('Statut')).trim() : null;
+      let retard = null;
+      if(dateReelle && datePrev) retard = Math.round((new Date(dateReelle) - new Date(datePrev)) / 86400000);
+      records.push({
+        N_OT:nOt, Date_Reception_OT:dateReception, Description: get('Description')?String(get('Description')).trim():null,
+        Type_travaux: get('Type_travaux')?String(get('Type_travaux')).trim():null, Localisation: get('Localisation')?String(get('Localisation')).trim():null,
+        Superviseur: get('Superviseur')?String(get('Superviseur')).trim():null, Prestataire: get('Prestataire')?String(get('Prestataire')).trim():null,
+        Date_Diagnostic:dateDiag, Date_Previsionnelle:datePrev, Date_Reelle:dateReelle, Cout_Previsionnel:coutPrev, Cout_Final:coutFinal,
+        Taux_Satisfaction:taux, Statut:statut, Commentaires: get('Commentaires')?String(get('Commentaires')).trim():null,
+        Mois: moisLabelFromDate(dateReception) || sheetName, Statut_norm: computeStatutNorm(statut, dateReelle), Retard_jours: retard,
+      });
+    }
+  });
+  return records;
+}
+document.getElementById('importFileInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  await window.__libsReady;
+  if(typeof XLSX === 'undefined'){ showToast("Import Excel indisponible : bibliothèque non chargée.", true); e.target.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = async (ev)=>{
+    try{
+      const data = new Uint8Array(ev.target.result);
+      const workbook = XLSX.read(data, {type:'array', cellDates:true});
+      const records = parseWorkbook(workbook);
+      if(records.length === 0){ showToast("Aucune donnée reconnue dans le fichier.", true); return; }
+      const serverRecords = await apiImportDossiers(records);
+      if(serverRecords){ serverRecords.forEach(r=>{ r.__uid = r.id; }); RAW_DATA = serverRecords; }
+      else{ assignUids(records); RAW_DATA = records; }
+      FILTER_DEFS.forEach(f=>filterState[f.key].clear());
+      document.getElementById('f-date-debut').value=''; document.getElementById('f-date-fin').value='';
+      document.getElementById('searchBox').value=''; searchTerm='';
+      sortKey='Date_Reception_OT'; sortDir=-1;
+      refreshFilterOptions(); setLastUpdate();
+      document.getElementById('totalRecords').textContent = RAW_DATA.length;
+      const sidebarFileEl = document.getElementById('sidebarSourceFile');
+      const footerFileEl = document.getElementById('footerSourceFile');
+      if(sidebarFileEl) sidebarFileEl.textContent = file.name;
+      if(footerFileEl) footerFileEl.textContent = file.name;
+      render();
+      showToast(serverRecords ? `${records.length} OT importé(s) et synchronisé(s).` : `${records.length} OT importé(s) (non synchronisé).`);
+    }catch(err){ console.error(err); showToast("Erreur de lecture du fichier Excel.", true); }
+    finally{ e.target.value = ''; }
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+// =========================================================
+// ÉVÉNEMENTS FILTRES / TABLEAU
+// =========================================================
+document.getElementById('filtersMultiselects').addEventListener('change', (e)=>{
+  if(e.target.type !== 'checkbox') return;
+  const key = e.target.dataset.key, val = e.target.value;
+  if(e.target.checked) filterState[key].add(val); else filterState[key].delete(val);
+  updateFilterButtonLabel(key); render();
+});
+document.getElementById('filtersMultiselects').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.msel-btn');
+  if(btn){
+    const key = btn.id.replace('msel-btn-','');
+    const panel = document.getElementById(`msel-panel-${key}`);
+    const willOpen = !panel.classList.contains('open');
+    document.querySelectorAll('.msel-panel.open').forEach(p=>p.classList.remove('open'));
+    document.querySelectorAll('.msel-btn[aria-expanded="true"]').forEach(b=>b.setAttribute('aria-expanded','false'));
+    if(willOpen){ panel.classList.add('open'); btn.setAttribute('aria-expanded','true'); const s=document.getElementById(`msel-search-${key}`); if(s) s.focus(); }
+    return;
+  }
+  const mini = e.target.closest('.msel-mini-btn');
+  if(mini){
+    const key = mini.dataset.key, action = mini.dataset.action;
+    document.querySelectorAll(`#msel-options-${key} input[type=checkbox]`).forEach(cb=>{
+      cb.checked = (action === 'all');
+      if(action === 'all') filterState[key].add(cb.value); else filterState[key].delete(cb.value);
+    });
+    updateFilterButtonLabel(key); render();
+  }
+});
+document.getElementById('filtersMultiselects').addEventListener('input', (e)=>{
+  if(!e.target.id.startsWith('msel-search-')) return;
+  const key = e.target.id.replace('msel-search-','');
+  const term = e.target.value.trim().toLowerCase();
+  document.querySelectorAll(`#msel-options-${key} .msel-option`).forEach(opt=>{ opt.style.display = opt.dataset.value.includes(term) ? '' : 'none'; });
+});
+document.addEventListener('click', (e)=>{
+  if(e.target.closest('.msel')) return;
+  document.querySelectorAll('.msel-panel.open').forEach(p=>p.classList.remove('open'));
+  document.querySelectorAll('.msel-btn[aria-expanded="true"]').forEach(b=>b.setAttribute('aria-expanded','false'));
+});
+document.getElementById('f-date-debut').addEventListener('input', render);
+document.getElementById('f-date-fin').addEventListener('input', render);
+document.getElementById('resetFilters').addEventListener('click', ()=>{
+  FILTER_DEFS.forEach(f=>filterState[f.key].clear());
+  document.getElementById('f-date-debut').value=''; document.getElementById('f-date-fin').value='';
+  document.getElementById('searchBox').value=''; searchTerm='';
+  populateFilterOptions(); render();
+});
+document.getElementById('btnToggleFilters').addEventListener('click', ()=>{
+  const bar = document.getElementById('filtersBar'); const btn = document.getElementById('btnToggleFilters');
+  const collapsed = bar.classList.toggle('collapsed');
+  btn.setAttribute('aria-expanded', String(!collapsed)); btn.classList.toggle('active', !collapsed);
+  if(!collapsed) bar.scrollIntoView({behavior:'smooth', block:'nearest'});
+});
+document.querySelectorAll('.sidebar-legend li[data-filter-key]').forEach(li=>{
+  li.addEventListener('click', ()=>{
+    const key = li.dataset.filterKey, value = li.dataset.filterValue;
+    const set = filterState[key];
+    const wasOnlyThis = set.size === 1 && set.has(value);
+    set.clear(); if(!wasOnlyThis) set.add(value);
+    populateFilterOptions(); render();
+  });
+});
+document.getElementById('selectAllCheckbox').addEventListener('change', (e)=>{
+  const visible = getSortedFiltered().map(d=>d.__uid);
+  if(e.target.checked) visible.forEach(uid=>selectedUids.add(uid));
+  else visible.forEach(uid=>selectedUids.delete(uid));
+  renderTable(getFiltered());
+});
+document.getElementById('btnDeleteSelected').addEventListener('click', async ()=>{
+  const count = selectedUids.size;
+  if(count === 0) return;
+  if(!confirm(`Supprimer les ${count} dossier(s) sélectionné(s) ? Cette action est irréversible.`)) return;
+  const uidsToDelete = [...selectedUids];
+  RAW_DATA = RAW_DATA.filter(d=>!selectedUids.has(d.__uid));
+  selectedUids.clear();
+  refreshFilterOptions();
+  document.getElementById('totalRecords').textContent = RAW_DATA.length;
+  render();
+  const results = await Promise.all(uidsToDelete.map(uid=>apiDeleteDossier(uid)));
+  showToast(results.every(Boolean) ? `${count} dossier(s) supprimé(s) (serveur synchronisé).` : `${count} dossier(s) supprimé(s) localement.`);
+});
+document.getElementById('searchBox').addEventListener('input', e=>{ searchTerm = e.target.value; render(); });
+document.querySelectorAll('#dataTable thead th').forEach(th=>{
+  th.addEventListener('click', ()=>{
+    const key = th.dataset.key; if(!key) return;
+    if(sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = 1; }
+    render();
+  });
+});
+
+// =========================================================
+// DÉMARRAGE
+// =========================================================
+function initApp(){
+  setLastUpdate();
+  buildFiltersUI();
+  refreshFilterOptions();
+  syncFromServer();
+  window.__libsReady.then(()=>{
+    if(typeof Chart !== 'undefined'){
+      Chart.defaults.color = cMuted; Chart.defaults.font.family = "'Inter', sans-serif"; Chart.defaults.font.size = 11;
+      try{ renderCharts(getFiltered()); }catch(err){ console.error(err); renderChartsNative(getFiltered()); }
+    }
+  });
+  // Signal de présence régulier : garde le statut "en ligne" à jour dans
+  // l'Administration même si l'utilisateur ne fait aucune action pendant un moment.
+  setInterval(()=>{ apiFetch('/api/auth/me').catch(()=>{}); }, 2 * 60 * 1000);
+}
+
+initAuthScreen();
+</script>
+</body>
+</html>
