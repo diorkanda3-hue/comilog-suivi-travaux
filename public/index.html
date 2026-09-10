@@ -1105,6 +1105,19 @@
     <div class="chart-wrap tall"><canvas id="chartDureePrestataire"></canvas></div>
   </div>
 
+  <div class="grid" style="margin-bottom:16px;">
+    <div class="panel">
+      <h3>Nombre d'OT par prestataire et par mois</h3>
+      <p class="panel-sub">Top 6 prestataires par volume d'OT</p>
+      <div class="chart-wrap tall"><canvas id="chartNbOTPrestataire"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>Coût par prestataire et par mois</h3>
+      <p class="panel-sub">Coût cumulé (FCFA) — mêmes 6 prestataires</p>
+      <div class="chart-wrap tall"><canvas id="chartCoutPrestataireMois"></canvas></div>
+    </div>
+  </div>
+
   <div class="panel table-panel" id="gestionDossiers">
     <div class="table-header-row">
       <div>
@@ -2413,6 +2426,18 @@ function renderCharts(data){
     data:{ labels: dpMonths, datasets: dpPrest.map((p,pi)=>({ label: isPartner(p) ? `${p} ★` : p, data: dpMonths.map(m=>dpMatrix[p][m]||0), backgroundColor: palette[pi % palette.length], borderRadius:4, maxBarThickness:26 })) },
     options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{boxWidth:10,padding:14}}, tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label} : ${ctx.raw} j`}}}, scales:{ x:{grid:{display:false}}, y:{grid:{color:cLine}, beginAtZero:true, ticks:{stepSize:1}, title:{display:true, text:'Jours', color:cMuted}} } }
   });
+
+  const {prestataires: ncPrest, months: ncMonths, nbMatrix: ncNbMatrix, coutMatrix: ncCoutMatrix} = buildNbOTCoutPrestataireMatrix(data);
+  charts.nbOTPrestataire = new Chart(document.getElementById('chartNbOTPrestataire'), {
+    type:'bar',
+    data:{ labels: ncMonths, datasets: ncPrest.map((p,pi)=>({ label: isPartner(p) ? `${p} ★` : p, data: ncMonths.map(m=>ncNbMatrix[p][m]||0), backgroundColor: palette[pi % palette.length], borderRadius:4, maxBarThickness:26 })) },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{boxWidth:10,padding:14}}}, scales:{ x:{grid:{display:false}}, y:{grid:{color:cLine}, beginAtZero:true, ticks:{stepSize:1}} } }
+  });
+  charts.coutPrestataireMois = new Chart(document.getElementById('chartCoutPrestataireMois'), {
+    type:'bar',
+    data:{ labels: ncMonths, datasets: ncPrest.map((p,pi)=>({ label: isPartner(p) ? `${p} ★` : p, data: ncMonths.map(m=>ncCoutMatrix[p][m]||0), backgroundColor: palette[pi % palette.length], borderRadius:4, maxBarThickness:26 })) },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{boxWidth:10,padding:14}}, tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label} : ${fmtFCFA(ctx.raw)}`}}}, scales:{ x:{grid:{display:false}}, y:{grid:{color:cLine}, beginAtZero:true, ticks:{callback:v=>fmtFCFAshort(v)}} } }
+  });
 }
 
 function buildTypeMonthMatrix(data){
@@ -2457,6 +2482,35 @@ function buildDureePrestataireMatrix(data){
     });
   });
   return { prestataires, months, matrix };
+}
+
+// Nombre d'OT et coût cumulé, par prestataire et par mois — même
+// sélection du top 6 prestataires (par volume d'OT) que le graphique
+// de durée, pour rester cohérent visuellement entre les graphiques.
+function buildNbOTCoutPrestataireMatrix(data){
+  const nbSums = {}; const coutSums = {}; const monthsSet = new Set(); const totalsByPrest = {};
+  data.forEach(d=>{
+    if(!d.Prestataire || !d.Mois) return;
+    const p = d.Prestataire, m = d.Mois;
+    monthsSet.add(m);
+    if(!nbSums[p]) nbSums[p] = {};
+    if(!coutSums[p]) coutSums[p] = {};
+    nbSums[p][m] = (nbSums[p][m] || 0) + 1;
+    const cout = d.Cout_Final != null ? d.Cout_Final : (d.Cout_Previsionnel != null ? d.Cout_Previsionnel : 0);
+    coutSums[p][m] = (coutSums[p][m] || 0) + cout;
+    totalsByPrest[p] = (totalsByPrest[p] || 0) + 1;
+  });
+  const prestataires = Object.keys(totalsByPrest).sort((a,b)=>totalsByPrest[b]-totalsByPrest[a]).slice(0,6);
+  const months = [...monthsSet].sort();
+  const nbMatrix = {}, coutMatrix = {};
+  prestataires.forEach(p=>{
+    nbMatrix[p] = {}; coutMatrix[p] = {};
+    months.forEach(m=>{
+      nbMatrix[p][m] = (nbSums[p] && nbSums[p][m]) || 0;
+      coutMatrix[p][m] = (coutSums[p] && coutSums[p][m]) || 0;
+    });
+  });
+  return { prestataires, months, nbMatrix, coutMatrix };
 }
 
 function setupCanvasHiDPI(canvas){
@@ -2593,6 +2647,10 @@ function renderChartsNative(data){
 
   const {prestataires: dpPrest, months: dpMonths, matrix: dpMatrix} = buildDureePrestataireMatrix(data);
   const c7 = document.getElementById('chartDureePrestataire'); if(c7) drawStackedHBarNative(c7, dpPrest, dpMonths, dpMatrix, palette);
+
+  const {prestataires: ncPrest, months: ncMonths, nbMatrix: ncNbMatrix, coutMatrix: ncCoutMatrix} = buildNbOTCoutPrestataireMatrix(data);
+  const c8 = document.getElementById('chartNbOTPrestataire'); if(c8) drawStackedHBarNative(c8, ncPrest, ncMonths, ncNbMatrix, palette);
+  const c9 = document.getElementById('chartCoutPrestataireMois'); if(c9) drawStackedHBarNative(c9, ncPrest, ncMonths, ncCoutMatrix, palette);
 }
 
 // =========================================================
