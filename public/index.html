@@ -867,60 +867,32 @@
 
   /* ---------- PRINT ---------- */
   @media print{
-    body{background:#fff !important; color:#111 !important;}
+    /* Force les navigateurs à imprimer les couleurs de fond et d'accent
+       (sans cette propriété, la plupart des navigateurs les ignorent par
+       défaut à l'impression, même si "graphiques d'arrière-plan" est coché). */
+    *{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+
     .sidebar{display:none !important;}
     .app-shell{display:block !important;}
     .app-content{width:100% !important;}
-    header{position:static !important; background:#fff !important; border-bottom:2px solid #111 !important; backdrop-filter:none !important;}
-    .brand-eyebrow, h1{color:#111 !important;}
-    .subtitle{color:#444 !important;}
+    header{position:static !important; backdrop-filter:none !important;}
     .filters, .toolbar, .refresh-tag, .search-box, #resetFilters, thead th:hover, #btnAddDossier, #btnToggleFilters, #btnDeleteSelected, .modal-overlay, th:last-child, td:last-child, th:first-child, td:first-child{display:none !important;}
     .table-header-row .search-box{display:none !important;}
     main{padding:12px 16px;}
-    .panel, .kpi-ticket{
-      background:#fff !important;
-      border:1px solid #ccc !important;
-      box-shadow:none !important;
-      break-inside:avoid;
-    }
-    .kpi-ticket::before{background:#111 !important;}
-    .kpi-value, .panel h3, h1{color:#111 !important;}
-    .kpi-sub, .panel-sub, .stub-label, .count-tag{color:#555 !important;}
-    .table-scroll{max-height:none !important; overflow:visible !important; border:1px solid #ccc !important;}
+    .panel, .kpi-ticket{break-inside:avoid;}
+    .table-scroll{max-height:none !important; overflow:visible !important;}
     .alertes-list{max-height:none !important; overflow:visible !important;}
-    .alerte-item{background:#fff !important; border:1px solid #ccc !important; border-left:3px solid #c33 !important; break-inside:avoid;}
-    .alerte-ot{color:#8a5c14 !important;}
-    .alerte-title{color:#111 !important;}
-    .alerte-meta{color:#555 !important;}
-    .alerte-days{color:#c33 !important;}
-    thead th{position:static !important; background:#eee !important; color:#111 !important;}
-    tbody td{color:#111 !important;}
-    .ot-cell{color:#111 !important;}
-    .badge.ok{background:#e5f4ec !important; color:#2f7a52 !important;}
-    .badge.wait{background:#fbeed9 !important; color:#8a5c14 !important;}
-    .badge.type{background:#e6f0fa !important; color:#2c608f !important;}
+    .alerte-item{break-inside:avoid;}
+    thead th{position:static !important;}
+    tr.data-row{cursor:default;}
     .kpi-row{grid-template-columns:repeat(4,1fr) !important;}
     .indicator-row{grid-template-columns:repeat(3,1fr) !important;}
-    .indicator-ticket{border:1px solid #ccc !important; background:#fff !important;}
-    .indicator-value, .indicator-label{color:#111 !important;}
-    .indicator-sub{color:#555 !important;}
-    .kpi-group-title{color:#111 !important;}
-    .kpi-group-title::after{background:#ccc !important;}
-    .dashboard-title h2{color:#111 !important;}
     .grid, .grid3{grid-template-columns:1fr 1fr !important;}
-    footer{color:#666 !important; border-top:1px solid #ccc !important;}
-
-    /* Badges non couverts par les règles ci-dessus (ajoutés depuis) */
-    .badge.indic-attente{background:#fbe4e2 !important; color:#a3352c !important;}
-    .badge.indic-encours{background:#fbeed9 !important; color:#8a5c14 !important;}
-    .badge.indic-solde{background:#e5f4ec !important; color:#2f7a52 !important;}
-    .partner-tag{background:#ece6f7 !important; color:#5b3fa0 !important;}
 
     /* Tableau : en-tête répété sur chaque page, pas de ligne coupée en deux */
     table{page-break-inside:auto;}
     thead{display:table-header-group;}
     tbody tr{break-inside:avoid; page-break-inside:avoid;}
-    tr.data-row{cursor:default;}
 
     /* Un panneau (graphique, KPI...) ne doit jamais être coupé entre deux pages */
     .panel, .kpi-ticket, .indicator-ticket, .chart-wrap{break-inside:avoid; page-break-inside:avoid;}
@@ -1065,6 +1037,31 @@
   <p class="kpi-group-title">Performance &amp; qualité</p>
   <div class="kpi-row" id="kpiRowPerformance"></div>
 
+  <div class="panel table-panel" style="margin-bottom:16px;">
+    <div class="table-header-row" style="margin-bottom:10px;">
+      <div>
+        <h3 style="margin-bottom:2px;">👷 Suivi par prestataire et par mois</h3>
+        <p class="panel-sub" style="margin-bottom:0;">Nombre d'OT, coût cumulé et durée de traitement, par prestataire — respecte les filtres actifs</p>
+      </div>
+      <span class="count-tag" id="prestMonthCount"></span>
+    </div>
+    <div class="table-scroll" style="max-height:420px;">
+      <table>
+        <thead>
+          <tr>
+            <th style="cursor:default;">Mois</th>
+            <th style="cursor:default;">Prestataire</th>
+            <th style="cursor:default;">Nombre d'OT</th>
+            <th style="cursor:default;">Coût cumulé (FCFA)</th>
+            <th style="cursor:default;">Durée moyenne (jours)</th>
+            <th style="cursor:default;">Durée totale (jours)</th>
+          </tr>
+        </thead>
+        <tbody id="prestMonthTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="grid" id="chartsSection">
     <div class="panel">
       <h3>Coût final par type de travaux</h3>
@@ -1100,6 +1097,12 @@
     <h3>Types de travaux par mois</h3>
     <p class="panel-sub">Nombre d'ordres de travail par type, réparti par mois — utilisez le filtre « Mois » pour isoler une période</p>
     <div class="chart-wrap tall"><canvas id="chartTypeMonth"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:16px;">
+    <h3>Durée d'intervention par prestataire et par mois</h3>
+    <p class="panel-sub">Durée moyenne de traitement (en jours) — top 6 prestataires par nombre d'OT, respecte les filtres actifs</p>
+    <div class="chart-wrap tall"><canvas id="chartDureePrestataire"></canvas></div>
   </div>
 
   <div class="panel table-panel" id="gestionDossiers">
@@ -2184,6 +2187,44 @@ const palette = ['#E2A33E','#3FB6A8','#4E97D9','#4CAF7C','#E2574E','#9C87D6','#D
 let charts = {};
 function destroyCharts(){ Object.values(charts).forEach(c=>c && c.destroy()); charts = {}; }
 
+// Regroupe les dossiers par mois de réception + prestataire, et calcule
+// le nombre d'OT, le coût cumulé et la durée de traitement (Date_Reelle -
+// Date_Reception_OT, en jours) pour chaque combinaison.
+function renderPrestataireMonthTable(data){
+  const tbody = document.getElementById('prestMonthTableBody');
+  if(!tbody) return;
+  const groups = {};
+  data.forEach(d=>{
+    if(!d.Prestataire || !d.Date_Reception_OT) return;
+    const mois = String(d.Date_Reception_OT).slice(0,7); // "AAAA-MM"
+    const key = mois + '||' + d.Prestataire;
+    if(!groups[key]) groups[key] = { mois, prestataire: d.Prestataire, nbOT:0, cout:0, dureeTotale:0, nbDureeConnue:0 };
+    const g = groups[key];
+    g.nbOT += 1;
+    g.cout += (d.Cout_Final != null ? d.Cout_Final : (d.Cout_Previsionnel != null ? d.Cout_Previsionnel : 0));
+    if(d.Date_Reelle){
+      const jours = Math.round((new Date(d.Date_Reelle) - new Date(d.Date_Reception_OT)) / 86400000);
+      if(!isNaN(jours) && jours >= 0){ g.dureeTotale += jours; g.nbDureeConnue += 1; }
+    }
+  });
+  const rows = Object.values(groups).sort((a,b)=> a.mois === b.mois ? a.prestataire.localeCompare(b.prestataire) : b.mois.localeCompare(a.mois));
+  const fmtMois = m => { const [y,mo]=m.split('-'); return new Date(y, mo-1, 1).toLocaleDateString('fr-FR',{month:'long',year:'numeric'}); };
+  document.getElementById('prestMonthCount').textContent = rows.length ? `${rows.length} ligne(s)` : '';
+  if(rows.length === 0){
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Aucune donnée pour les filtres actifs (prestataire et date de réception requis).</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(g=>`
+    <tr>
+      <td style="text-transform:capitalize;">${fmtMois(g.mois)}</td>
+      <td>${escapeHtml(g.prestataire)}</td>
+      <td>${g.nbOT}</td>
+      <td>${fmtFCFA(g.cout)}</td>
+      <td>${g.nbDureeConnue ? Math.round(g.dureeTotale / g.nbDureeConnue) + ' j' : '—'}</td>
+      <td>${g.nbDureeConnue ? g.dureeTotale + ' j' : '—'}</td>
+    </tr>`).join('');
+}
+
 function render(){
   const data = getFiltered();
   updateActiveFilterCount();
@@ -2196,6 +2237,7 @@ function render(){
     try{ renderChartsNative(data); }catch(err2){ console.error(err2); }
   }
   renderTable(data);
+  try{ renderPrestataireMonthTable(data); }catch(err){ console.error('Erreur tableau prestataire/mois:', err); }
 }
 
 const ALERTES_MAX_SHOWN = 25;
@@ -2364,6 +2406,13 @@ function renderCharts(data){
     data:{ labels: tmTypes, datasets: tmMonths.map((m,mi)=>({ label:m, data: tmTypes.map(t=>tmMatrix[t][m]||0), backgroundColor: palette[mi % palette.length], borderRadius:4, maxBarThickness:26 })) },
     options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{boxWidth:10,padding:14}}}, scales:{ x:{stacked:true, grid:{color:cLine}, ticks:{stepSize:1}}, y:{stacked:true, grid:{display:false}} } }
   });
+
+  const {prestataires: dpPrest, months: dpMonths, matrix: dpMatrix} = buildDureePrestataireMatrix(data);
+  charts.dureePrestataire = new Chart(document.getElementById('chartDureePrestataire'), {
+    type:'bar',
+    data:{ labels: dpMonths, datasets: dpPrest.map((p,pi)=>({ label: isPartner(p) ? `${p} ★` : p, data: dpMonths.map(m=>dpMatrix[p][m]||0), backgroundColor: palette[pi % palette.length], borderRadius:4, maxBarThickness:26 })) },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{boxWidth:10,padding:14}}, tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label} : ${ctx.raw} j`}}}, scales:{ x:{grid:{display:false}}, y:{grid:{color:cLine}, beginAtZero:true, ticks:{stepSize:1}, title:{display:true, text:'Jours', color:cMuted}} } }
+  });
 }
 
 function buildTypeMonthMatrix(data){
@@ -2378,6 +2427,36 @@ function buildTypeMonthMatrix(data){
     return totalB - totalA;
   });
   return {types, months:[...monthsSet].sort(), matrix};
+}
+
+// Durée moyenne de traitement (Date_Reelle - Date_Reception_OT, en jours)
+// par prestataire et par mois. Ne retient que le top 6 des prestataires
+// (par nombre d'OT avec durée connue), pour rester lisible.
+function buildDureePrestataireMatrix(data){
+  const sums = {}; const monthsSet = new Set(); const totalsByPrest = {};
+  data.forEach(d=>{
+    if(!d.Prestataire || !d.Mois || !d.Date_Reception_OT || !d.Date_Reelle) return;
+    const p = d.Prestataire, m = d.Mois;
+    const jours = Math.round((new Date(d.Date_Reelle) - new Date(d.Date_Reception_OT)) / 86400000);
+    if(isNaN(jours) || jours < 0) return;
+    monthsSet.add(m);
+    if(!sums[p]) sums[p] = {};
+    if(!sums[p][m]) sums[p][m] = { total: 0, count: 0 };
+    sums[p][m].total += jours; sums[p][m].count += 1;
+    totalsByPrest[p] = (totalsByPrest[p] || 0) + 1;
+  });
+  const prestataires = Object.keys(totalsByPrest).sort((a,b)=>totalsByPrest[b]-totalsByPrest[a]).slice(0,6);
+  const months = [...monthsSet].sort();
+  // matrice "plate" : matrix[prestataire][mois] = durée moyenne (jours)
+  const matrix = {};
+  prestataires.forEach(p=>{
+    matrix[p] = {};
+    months.forEach(m=>{
+      const cell = sums[p] && sums[p][m];
+      matrix[p][m] = cell ? Math.round(cell.total / cell.count) : 0;
+    });
+  });
+  return { prestataires, months, matrix };
 }
 
 function setupCanvasHiDPI(canvas){
@@ -2511,6 +2590,9 @@ function renderChartsNative(data){
 
   const {types: tmTypes, months: tmMonths, matrix: tmMatrix} = buildTypeMonthMatrix(data);
   const c6 = document.getElementById('chartTypeMonth'); if(c6) drawStackedHBarNative(c6, tmTypes, tmMonths, tmMatrix, palette);
+
+  const {prestataires: dpPrest, months: dpMonths, matrix: dpMatrix} = buildDureePrestataireMatrix(data);
+  const c7 = document.getElementById('chartDureePrestataire'); if(c7) drawStackedHBarNative(c7, dpPrest, dpMonths, dpMatrix, palette);
 }
 
 // =========================================================
@@ -3039,4 +3121,3 @@ initAuthScreen();
 </script>
 </body>
 </html>
-
