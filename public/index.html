@@ -1155,6 +1155,7 @@
             <th data-key="Localisation">Localisation</th>
             <th data-key="Superviseur">Superviseur</th>
             <th data-key="Prestataire">Prestataire</th>
+            <th style="cursor:default;" title="Nombre total d'OT de ce prestataire sur ce mois">Nb OT/mois</th>
             <th data-key="Date_Previsionnelle">Prévu</th>
             <th data-key="Date_Reelle">Réel</th>
             <th data-key="Cout_Final">Coût final</th>
@@ -2663,8 +2664,19 @@ function renderTable(data){
   const allUids = new Set(RAW_DATA.map(d=>d.__uid));
   selectedUids.forEach(uid=>{ if(!allUids.has(uid)) selectedUids.delete(uid); });
 
+  // Nombre total d'OT de chaque prestataire sur son mois — calculé sur
+  // l'ensemble complet des dossiers (pas seulement ceux filtrés), pour
+  // donner une vue complète et stable même si d'autres filtres (statut,
+  // localisation...) sont actifs par ailleurs.
+  const nbOTMoisLookup = {};
+  RAW_DATA.forEach(d=>{
+    if(!d.Prestataire || !d.Mois) return;
+    const key = d.Prestataire + '||' + d.Mois;
+    nbOTMoisLookup[key] = (nbOTMoisLookup[key] || 0) + 1;
+  });
+
   if(sorted.length === 0){
-    document.getElementById('tableBody').innerHTML = `<tr><td colspan="14" class="empty-state">Aucun ordre de travail ne correspond aux filtres sélectionnés.</td></tr>`;
+    document.getElementById('tableBody').innerHTML = `<tr><td colspan="15" class="empty-state">Aucun ordre de travail ne correspond aux filtres sélectionnés.</td></tr>`;
     updateDeleteSelectedState([]);
     return;
   }
@@ -2674,6 +2686,7 @@ function renderTable(data){
     const indic = getIndicateur(d);
     const indicClass = indic === 'Soldé' ? 'indic-solde' : indic === 'En cours' ? 'indic-encours' : 'indic-attente';
     const checked = selectedUids.has(d.__uid) ? 'checked' : '';
+    const nbOTMois = (d.Prestataire && d.Mois) ? (nbOTMoisLookup[d.Prestataire + '||' + d.Mois] || 0) : null;
     return `<tr class="data-row" data-uid="${d.__uid}" title="Cliquer pour voir le détail complet">
       <td class="row-select" onclick="event.stopPropagation()"><input type="checkbox" class="row-checkbox" data-uid="${d.__uid}" ${checked}></td>
       <td class="ot-cell mono">${d.N_OT}</td>
@@ -2682,6 +2695,7 @@ function renderTable(data){
       <td>${d.Localisation || '—'}</td>
       <td>${d.Superviseur || '—'}</td>
       <td>${d.Prestataire ? d.Prestataire + (isPartner(d.Prestataire) ? '<span class="partner-tag" title="Prestataire en partenariat avec Comilog">Partenaire</span>' : '') : '—'}</td>
+      <td class="mono" style="text-align:center;" title="Nombre total d'OT de ce prestataire sur ${d.Mois || 'ce mois'}">${nbOTMois != null ? nbOTMois : '—'}</td>
       <td>${fmtDate(d.Date_Previsionnelle)}</td>
       <td>${fmtDate(d.Date_Reelle)}</td>
       <td class="mono">${d.Cout_Final ? fmtFCFA(d.Cout_Final) : '—'}</td>
@@ -3179,3 +3193,4 @@ initAuthScreen();
 </script>
 </body>
 </html>
+
