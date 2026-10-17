@@ -24,6 +24,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 const { URL } = require('url');
 
 const PORT = process.env.PORT || 3001;
@@ -33,6 +34,84 @@ const DOSSIERS_FILE = path.join(DATA_DIR, 'dossiers.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const ACTIVITY_FILE = path.join(DATA_DIR, 'activity.json');
 const ACTIVITY_MAX_ENTRIES = 1000; // évite que le fichier ne grossisse indéfiniment
+
+// ============================================================
+// Synchronisation multi-PC (optionnelle) via Firebase Firestore
+// ------------------------------------------------------------
+// Le stockage local (fichiers .json) reste la source rapide pour
+// chaque PC — rien ne change dans le fonctionnement habituel. Si un
+// fichier de clé de service Firebase est présent (ou indiqué via la
+// variable d'environnement FIREBASE_SERVICE_ACCOUNT_PATH), ce PC va
+// en plus :
+//   - pousser ses dossiers vers Firestore juste après chaque écriture
+//   - récupérer la version Firestore toutes les ~20 secondes et
+//     écraser le fichier local SI la version Firestore est plus
+//     récente que ce que ce PC connaît déjà
+// Sans ce fichier de clé, l'application fonctionne exactement comme
+// avant — la synchronisation est simplement désactivée.
+// ============================================================
+const FIREBASE_KEY_PATH = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+  || path.join(__dirname, 'firebase-service-account.json');
+const SYNC_POLL_INTERVAL_MS = 20000; // 20 secondes
+const SYNC_DOC_COLLECTION = 'comilog_suivi_travaux';
+const SYNC_DOC_ID = 'dossiers';
+const SYNC_SOURCE_ID = os.hostname();
+
+let syncEnabled = false;
+let firestoreDb = null;
+let lastKnownCloudTimestamp = 0; // dernière version Firestore déjà appliquée localement
+
+function initCloudSync(){
+  if(!fs.existsSync(FIREBASE_KEY_PATH)){
+    console.log('  Synchronisation multi-PC : désactivée (aucune clé Firebase trouvée).');
+    return;
+  }
+  try{
+    const admin = require('firebase-admin');
+    const { getFirestore } = require('firebase-admin/firestore');
+    const serviceAccount = JSON.parse(fs.readFileSync(FIREBASE_KEY_PATH, 'utf8'));
+    admin.initializeApp({ credential: admin.cert(serviceAccount) });
+    firestoreDb = getFirestore();
+    syncEnabled = true;
+    console.log('  Synchronisation multi-PC : activée (Firebase Firestore).');
+  }catch(err){
+    console.error('  Synchronisation multi-PC : erreur d\'initialisation —', err.message);
+    console.error('  L\'application continue de fonctionner en local uniquement.');
+  }
+}
+
+// Pousse la liste actuelle vers Firestore. Ne bloque jamais l'écriture
+// locale : en cas d'échec (pas d'internet, etc.), on réessaiera à la
+// prochaine écriture — rien n'est perdu localement.
+function pushDossiersToCloud(list){
+  if(!syncEnabled) return;
+  const now = Date.now();
+  firestoreDb.collection(SYNC_DOC_COLLECTION).doc(SYNC_DOC_ID).set({
+    data: list,
+    updatedAt: now,
+    updatedBy: SYNC_SOURCE_ID
+  }).then(()=>{ lastKnownCloudTimestamp = now; })
+    .catch(err=> console.error('  Sync → échec de l\'envoi vers Firestore :', err.message));
+}
+
+// Récupère la version Firestore ; si elle est plus récente que la
+// dernière version connue de CE PC, écrase le fichier local.
+async function pullDossiersFromCloud(){
+  if(!syncEnabled) return;
+  try{
+    const snap = await firestoreDb.collection(SYNC_DOC_COLLECTION).doc(SYNC_DOC_ID).get();
+    if(!snap.exists) return;
+    const remote = snap.data();
+    if(!remote || !Array.isArray(remote.data)) return;
+    if(remote.updatedAt > lastKnownCloudTimestamp){
+      writeJSON(DOSSIERS_FILE, remote.data);
+      lastKnownCloudTimestamp = remote.updatedAt;
+      console.log(`  Sync ← ${remote.data.length} dossier(s) reçu(s) depuis Firestore (envoyé par ${remote.updatedBy || '?'}).`);
+    }
+  }catch(err){
+    console.error('  Sync ← échec de la récupération depuis Firestore :', err.message);
+  }
+}
 
 // ============================================================
 // Stockage fichier (dossiers + utilisateurs + historique)
@@ -53,7 +132,7 @@ function writeJSON(file, data){
   fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
 }
 const readDossiers = () => readJSON(DOSSIERS_FILE);
-const writeDossiers = (list) => writeJSON(DOSSIERS_FILE, list);
+const writeDossiers = (list) => { writeJSON(DOSSIERS_FILE, list); pushDossiersToCloud(list); };
 const readUsers = () => readJSON(USERS_FILE);
 const writeUsers = (list) => writeJSON(USERS_FILE, list);
 const readActivity = () => readJSON(ACTIVITY_FILE);
@@ -522,6 +601,30 @@ const server = http.createServer(async (req, res)=>{
     return;
   }
 
+  // Suppression d'une entrée précise de l'historique (réservé aux administrateurs)
+  const activityMatch = pathname.match(/^\/api\/activity\/([^/]+)$/);
+  if(activityMatch && req.method === 'DELETE'){
+    const admin = requireAdmin(req, res);
+    if(!admin) return;
+    const id = Number(activityMatch[1]);
+    const list = readActivity();
+    const next = list.filter(a => a.id !== id);
+    if(next.length === list.length){ sendJSON(res, 404, { error: 'Entrée introuvable.' }); return; }
+    writeJSON(ACTIVITY_FILE, next);
+    sendJSON(res, 200, { deleted: true, id });
+    return;
+  }
+
+  // Vidage complet de l'historique (réservé aux administrateurs)
+  if(pathname === '/api/activity' && req.method === 'DELETE'){
+    const admin = requireAdmin(req, res);
+    if(!admin) return;
+    writeJSON(ACTIVITY_FILE, []);
+    logActivity(admin.username, 'historique_vide', "L'historique complet a été vidé");
+    sendJSON(res, 200, { cleared: true });
+    return;
+  }
+
   // ---------------- SAUVEGARDE / RESTAURATION (réservé aux administrateurs) ----------------
   // Permet de télécharger une copie complète de toutes les données
   // (dossiers, comptes, historique) sur son propre ordinateur, et de
@@ -610,12 +713,16 @@ function applyAdminResetFromEnv(){
   writeUsers(users);
 }
 
-server.listen(PORT, '0.0.0.0', ()=>{
+server.listen(PORT, '0.0.0.0', async ()=>{
   ensureDataFiles();
   applyAdminResetFromEnv();
+  initCloudSync();
+  if(syncEnabled){
+    await pullDossiersFromCloud(); // on se met à jour avant d'afficher le compte de dossiers
+    setInterval(pullDossiersFromCloud, SYNC_POLL_INTERVAL_MS);
+  }
   const dossierCount = readDossiers().length;
   const userCount = readUsers().length;
-  const os = require('os');
   const nets = os.networkInterfaces();
   const lanIps = [];
   Object.values(nets).forEach(ifaces=>{ (ifaces||[]).forEach(iface=>{ if(iface.family==='IPv4' && !iface.internal) lanIps.push(iface.address); }); });
@@ -627,6 +734,7 @@ server.listen(PORT, '0.0.0.0', ()=>{
   console.log(`  API                  : http://localhost:${PORT}/api/dossiers`);
   console.log(`  Dossiers en mémoire  : ${dossierCount}`);
   console.log(`  Comptes utilisateurs : ${userCount}${userCount === 0 ? ' (aucun — le premier compte créé sera administrateur)' : ''}`);
+  console.log(`  Synchronisation      : ${syncEnabled ? 'activée (Firebase)' : 'désactivée (ce PC uniquement)'}`);
   console.log('  (Ctrl+C pour arrêter)');
   console.log('');
 });
